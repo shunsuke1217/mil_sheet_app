@@ -72,3 +72,9 @@ def sample_pages():
 def fixture_master():
     from millsheet.master import load_master_file
     return load_master_file(FIXTURES / "unit_weights.json")
+
+
+@pytest.fixture
+def sample_records(sample_pages, fixture_master):
+    from millsheet.normalize import build_records
+    return build_records(sample_pages, fixture_master)
