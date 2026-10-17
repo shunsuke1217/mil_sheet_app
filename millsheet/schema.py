@@ -2,26 +2,36 @@
 from dataclasses import dataclass
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class Line(BaseModel):
-    commodity_raw: str | None   # ミルシートの品名欄の表記をそのまま（例: H形鋼, CHANNELS, 軽量形鋼）。品名は AI ではなくアプリが判定する（6.4 節）
-    grade: str | None           # 材質の記号のみ（SS400, SN490C, SSC400 など）。"JIS G3101" は含めない
-    size_raw: str | None        # 寸法を印字どおりに（例: 200X100X5.5/8）
-    length_raw: str | None      # 長さを印字どおり単位も含めて（例: 11.5M, 5.500m, 12,000, 5.5）
-    circle_status: Literal["あり", "なし", "読めない"]  # この行の手書きの丸数字の状態
-    circled_qty: int | None     # 丸数字の値。circle_status が「あり」のときだけ入れ、それ以外は null
-    printed_qty: int | None     # 印字された本数・員数
-    mass_kg: float | None       # 印字された質量(kg)
-    uncertain: bool             # 読み取りに自信が無い値があれば true
-    note: str | None            # 気になった点
+    commodity_raw: str | None = Field(description=(
+        "品名欄（品名・品種・COMMODITY など）の表記を印字どおりに写す（例: H形鋼, CHANNELS, 軽量形鋼）。"
+        "本表と別表の両方に品名があれば \" / \" でつないで両方入れる。品名の判定はしない"))
+    grade: str | None = Field(description=(
+        "材質の記号だけ（例: SS400, SN490C, SSC400）。\"JIS G3101\" などの規格番号は含めない"))
+    size_raw: str | None = Field(description=(
+        "寸法を印字どおりに写す（例: 200X100X5.5/8）。並べ替え・換算はしない"))
+    length_raw: str | None = Field(description=(
+        "長さを印字どおり、単位も含めて写す（例: 11.5M, 5.500m, 12000, 5.5）。換算はしない。数値のカンマは除く"))
+    circle_status: Literal["あり", "なし", "読めない"] = Field(description=(
+        "この行の手書きの丸数字の状態。丸数字があり数字が読める → あり。"
+        "丸はあるが、かすれ・押印の重なりなどで数字が読めない → 読めない。丸数字が書かれていない → なし"))
+    circled_qty: int | None = Field(description=(
+        "手書きの丸数字の値（この現場で使う本数）。circle_status が「あり」のときだけ入れ、それ以外は null"))
+    printed_qty: int | None = Field(description="印字された本数・員数。数値のカンマは除く")
+    mass_kg: float | None = Field(description="印字された質量(kg)。数値のカンマは除く")
+    uncertain: bool = Field(description="この行に読み取りに自信が無い値があれば true。読めずに null にした値があるときも true")
+    note: str | None = Field(description="気になった点があれば短く書く。なければ null")
 
 
 class PageResult(BaseModel):
-    is_certificate: bool        # 鋼材の検査証明書なら true
-    stamp_valid_qty: int | None # 押印「○印 N 本のみ有効」の N
-    lines: list[Line]
+    is_certificate: bool = Field(description=(
+        "鋼材の検査証明書なら true。送付状・表紙など証明書ではないページは false にし、lines は空にする"))
+    stamp_valid_qty: int | None = Field(description=(
+        "「本証明書は○印 N 本のみ有効です」という押印の手書きの N。押印が無い・読めないときは null"))
+    lines: list[Line] = Field(description="手書きの丸数字が付いた行（数字が読めない丸数字の行も含む）")
 
 
 @dataclass
