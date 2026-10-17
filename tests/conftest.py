@@ -112,3 +112,13 @@ def _fixture_master_loader():
 @pytest.fixture
 def fixture_master_loader():
     return _fixture_master_loader
+
+
+@pytest.fixture(autouse=True)
+def no_blocking_dialogs(monkeypatch):
+    """テスト中に警告ダイアログが出ると止まってしまうので、出さずに記録する。"""
+    from PySide6.QtWidgets import QMessageBox
+    shown = []
+    for name in ("warning", "information", "critical"):
+        monkeypatch.setattr(QMessageBox, name, lambda *a, _n=name, **k: shown.append((_n, a[2] if len(a) > 2 else "")))
+    return shown

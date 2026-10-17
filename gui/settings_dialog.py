@@ -24,7 +24,7 @@ class SettingsDialog(QDialog):
         sheet_hint.setWordWrap(True)
         sheet_hint.setStyleSheet("color: gray;")
         self.output_path_edit = QLineEdit(self.settings.output_path)
-        self.output_path_edit.setPlaceholderText("xlsx を保存するフォルダ（空欄なら PDF のフォルダの隣）")
+        self.output_path_edit.setPlaceholderText("空欄なら PDF のフォルダの隣（Google ドライブの同期フォルダも選べます）")
         browse = QPushButton("参照…")
         browse.clicked.connect(self._choose_output_dir)
         out_row = QHBoxLayout()
@@ -35,7 +35,7 @@ class SettingsDialog(QDialog):
         form.addRow("Gemini の API キー", self.gemini_key_edit)
         form.addRow("単重マスタの URL", self.sheet_url_edit)
         form.addRow("", sheet_hint)
-        form.addRow("出力先のフォルダ", out_row)
+        form.addRow("出力フォルダを作る場所", out_row)
 
         self.test_button = QPushButton("接続を確かめる")
         self.test_button.clicked.connect(self._test_connection)
@@ -66,7 +66,7 @@ class SettingsDialog(QDialog):
         return e
 
     def _choose_output_dir(self) -> None:
-        d = QFileDialog.getExistingDirectory(self, "出力先のフォルダ", self.output_path_edit.text())
+        d = QFileDialog.getExistingDirectory(self, "出力フォルダを作る場所", self.output_path_edit.text())
         if d:
             self.output_path_edit.setText(d)
 

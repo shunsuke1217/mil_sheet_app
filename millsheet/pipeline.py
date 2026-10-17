@@ -26,11 +26,15 @@ log = logging.getLogger(__name__)
 MasterLoader = Callable[[], tuple[Master, list[str]]]
 
 
+WORK_DIR_NAME = "作業データ"
+
+
 @dataclass
 class Outputs:
+    dir: Path            # 実行ごとの出力フォルダ（この中に xlsx と PDF）
     xlsx: Path
-    json: Path
-    raw: Path
+    json: Path           # 作業データ/ の中
+    raw: Path            # 作業データ/ の中（作り直しに使う）
     pdf: Path | None
 
 
@@ -43,11 +47,13 @@ class RunResult:
     errors: list[str]
 
 
-def outputs_for(xlsx: Path) -> Outputs:
-    xlsx = Path(xlsx)
-    stem = xlsx.stem   # 「2026.10.17.xlsx」でも最後の拡張子だけを外す
-    return Outputs(xlsx, xlsx.with_name(f"{stem}.json"), xlsx.with_name(f"{stem}_raw.json"),
-                   xlsx.with_name(f"{stem}.pdf"))
+def outputs_for(out_dir: Path) -> Outputs:
+    """出力フォルダ「現場A/」→ 現場A/現場A.xlsx・現場A/現場A.pdf・現場A/作業データ/現場A.json・…_raw.json"""
+    out_dir = Path(out_dir)
+    name = out_dir.name   # 「2026.10.17」のように「.」を含んでも名前のまま使う
+    work = out_dir / WORK_DIR_NAME
+    return Outputs(out_dir, out_dir / f"{name}.xlsx", work / f"{name}.json", work / f"{name}_raw.json",
+                   out_dir / f"{name}.pdf")
 
 
 def _locked_message(e: OutputLockedError) -> str:
@@ -90,14 +96,14 @@ def _build_and_export(pages: list[PageEntry], source_dir: Path | None, outputs: 
             errors.append(f"元の PDF が見つからないため、PDF は作れませんでした（{'、'.join(e.missing)}）")
         except OutputLockedError as e:
             errors.append(_locked_message(e))
-    outputs = Outputs(outputs.xlsx, outputs.json, outputs.raw, pdf)
+    outputs = Outputs(outputs.dir, outputs.xlsx, outputs.json, outputs.raw, pdf)
     for msg in warnings + errors:
         log.warning(msg)
     log.info("出力しました: %s（%d 行）", outputs.xlsx, len(ordered))
     return RunResult(ordered, outputs, master, warnings, errors)
 
 
-def run(source_dir: Path, xlsx: Path, *, settings: Settings, gemini_key: str,
+def run(source_dir: Path, out_dir: Path, *, settings: Settings, gemini_key: str,
         reader: PageReader | None = None, workers: int = 4, master_loader: MasterLoader | None = None,
         on_progress: Callable[[str, int, int, int, int], None] = lambda *a: None,
         cancel: threading.Event | None = None) -> RunResult:
@@ -107,24 +113,24 @@ def run(source_dir: Path, xlsx: Path, *, settings: Settings, gemini_key: str,
     loader = _master_loader(settings, master_loader)
     if not list_pdfs(source_dir):
         raise ValueError(f"フォルダに PDF がありません: {source_dir}")
-    Path(xlsx).parent.mkdir(parents=True, exist_ok=True)   # 読み終えてから保存できないのを防ぐ
-    log.info("読み取りを始めます: %s → %s", source_dir, xlsx)
+    outputs = outputs_for(out_dir)
+    outputs.raw.parent.mkdir(parents=True, exist_ok=True)   # 読み終えてから保存できないのを防ぐ
+    log.info("読み取りを始めます: %s → %s", source_dir, outputs.dir)
     master, warnings = loader()           # 課金の前にマスタを確かめる
     pages = read_folder(source_dir, reader or GeminiReader(gemini_key), PageCache(paths.cache_dir()),
                         workers=workers, on_progress=on_progress, cancel=cancel)
-    outputs = outputs_for(xlsx)
     write_raw(outputs.raw, source_dir, pages)
     return _build_and_export(pages, source_dir, outputs, master, list(warnings), settings)
 
 
-def rebuild(raw: Path, xlsx: Path, *, settings: Settings,
-            master_loader: MasterLoader | None = None) -> RunResult:
+def rebuild(out_dir: Path, *, settings: Settings, master_loader: MasterLoader | None = None) -> RunResult:
+    outputs = outputs_for(out_dir)
+    if not outputs.raw.exists():
+        raise FileNotFoundError(f"読み取り結果（{outputs.raw}）が無いため作り直せません。もう一度読み取りを実行してください")
     loader = _master_loader(settings, master_loader)
     master, warnings = loader()
-    source_dir, pages = read_raw(raw)
-    log.info("作り直します: %s → %s", raw, xlsx)
-    outputs = outputs_for(xlsx)
-    outputs = Outputs(outputs.xlsx, outputs.json, Path(raw), outputs.pdf)
+    source_dir, pages = read_raw(outputs.raw)
+    log.info("作り直します: %s", outputs.dir)
     return _build_and_export(pages, source_dir, outputs, master, list(warnings), settings)
 
 

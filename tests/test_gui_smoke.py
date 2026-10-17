@@ -1,3 +1,4 @@
+import shutil
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -9,20 +10,45 @@ from millsheet.settings import get_secret, load_settings
 
 
 def test_main_window_opens(qtbot):
-    w = MainWindow(fetch_on_start=False); qtbot.addWidget(w)
+    w = MainWindow(fetch_on_start=False, open_folder_on_finish=False); qtbot.addWidget(w)
     assert w.run_button.isEnabled() is False          # フォルダと出力先が決まるまで押せない
 
 
 def test_main_window_enables_run(qtbot, tmp_path):
-    w = MainWindow(fetch_on_start=False); qtbot.addWidget(w)
-    w.set_source_dir(tmp_path); w.set_output_path(tmp_path / "o.xlsx")
+    w = MainWindow(fetch_on_start=False, open_folder_on_finish=False); qtbot.addWidget(w)
+    (tmp_path / "現場A").mkdir()
+    w.set_source_dir(tmp_path / "現場A")
     assert w.run_button.isEnabled()
+    # 設定の出力先が空欄なら PDF のフォルダの隣。同じ名前にならないよう「_出力」を付ける
+    assert w.output_name_edit.text() == "現場A_出力" and w.output_dir() == tmp_path / "現場A_出力"
 
 
-def test_main_window_output_gets_xlsx_suffix(qtbot, tmp_path):
-    w = MainWindow(fetch_on_start=False); qtbot.addWidget(w)
-    w.set_output_path(tmp_path / "結果")
-    assert w.output_edit.text().endswith("結果.xlsx")
+def test_output_folder_uses_settings_base(qtbot, tmp_path):
+    from millsheet.settings import Settings, save_settings
+    save_settings(Settings(output_path=str(tmp_path / "出力")))
+    w = MainWindow(fetch_on_start=False, open_folder_on_finish=False); qtbot.addWidget(w)
+    (tmp_path / "現場A").mkdir()
+    w.set_source_dir(tmp_path / "現場A")
+    assert w.output_name_edit.text() == "現場A"
+    w.output_name_edit.setText("2026-10 現場A")
+    assert w.output_dir() == tmp_path / "出力/2026-10 現場A"
+
+
+def test_invalid_folder_name_disables_run(qtbot, tmp_path):
+    w = MainWindow(fetch_on_start=False, open_folder_on_finish=False); qtbot.addWidget(w)
+    w.set_source_dir(tmp_path)
+    for bad in ("", "a/b", "a:b", "..", "  "):
+        w.output_name_edit.setText(bad)
+        assert not w.run_button.isEnabled(), bad
+
+
+def test_output_inside_source_folder_is_refused(qtbot, tmp_path):
+    from millsheet.settings import Settings, save_settings
+    (tmp_path / "A").mkdir()
+    save_settings(Settings(output_path=str(tmp_path / "A")))
+    w = MainWindow(fetch_on_start=False, open_folder_on_finish=False); qtbot.addWidget(w)
+    w.set_source_dir(tmp_path / "A")
+    assert not w.run_button.isEnabled() and "PDF のフォルダの中" in w.output_path_label.text()
 
 
 def test_settings_dialog_saves_without_writing_keys_to_file(qtbot, data_dir):
@@ -61,18 +87,18 @@ def test_run_worker_rebuild_emits_result(qtbot, tmp_path):
     from gui.worker import RunWorker
     from millsheet.settings import Settings
     from tests.conftest import _fixture_master_loader
-    shutil.copy("tests/fixtures/sample_raw.json", tmp_path / "o_raw.json")
-    w = RunWorker("rebuild", raw=tmp_path / "o_raw.json", xlsx=tmp_path / "o.xlsx", settings=Settings(),
-                  master_loader=_fixture_master_loader)
+    (tmp_path / "o/作業データ").mkdir(parents=True)
+    shutil.copy("tests/fixtures/sample_raw.json", tmp_path / "o/作業データ/o_raw.json")
+    w = RunWorker("rebuild", out_dir=tmp_path / "o", settings=Settings(), master_loader=_fixture_master_loader)
     with qtbot.waitSignal(w.finished_ok, timeout=10000) as sig:
         w.start()
-    assert len(sig.args[0].records) == 13 and (tmp_path / "o.xlsx").exists()
+    assert len(sig.args[0].records) == 13 and (tmp_path / "o/o.xlsx").exists()
 
 
 def test_run_worker_reports_friendly_error(qtbot, tmp_path):
     from gui.worker import RunWorker
     from millsheet.settings import Settings
-    w = RunWorker("run", source_dir=tmp_path, xlsx=tmp_path / "o.xlsx", settings=Settings(),
+    w = RunWorker("run", source_dir=tmp_path, out_dir=tmp_path / "o", settings=Settings(),
                   gemini_key="")
     with qtbot.waitSignal(w.failed, timeout=10000) as sig:
         w.start()
@@ -81,7 +107,7 @@ def test_run_worker_reports_friendly_error(qtbot, tmp_path):
 
 def test_review_list_copy(qtbot):
     from PySide6.QtGui import QGuiApplication
-    w = MainWindow(fetch_on_start=False); qtbot.addWidget(w)
+    w = MainWindow(fetch_on_start=False, open_folder_on_finish=False); qtbot.addWidget(w)
     w.review_list.addItems(["a.pdf の 1 ページ目", "b.pdf の 2 ページ目"])
     w.review_list.selectAll()
     w.copy_selected_reviews()
@@ -95,7 +121,7 @@ def test_refresh_master_twice_keeps_running_worker(qtbot, monkeypatch, data_dir)
     from millsheet.settings import Settings, save_settings
     save_settings(Settings(sheet_url="https://docs.google.com/spreadsheets/d/x/edit"))
     monkeypatch.setattr(wmod.MasterWorker, "run", lambda self: _t.sleep(0.3))
-    w = MainWindow(fetch_on_start=False); qtbot.addWidget(w)
+    w = MainWindow(fetch_on_start=False, open_folder_on_finish=False); qtbot.addWidget(w)
     w.refresh_master(); first = w.master_worker
     w.refresh_master()
     assert first in w._master_workers or first is w.master_worker
@@ -104,24 +130,24 @@ def test_refresh_master_twice_keeps_running_worker(qtbot, monkeypatch, data_dir)
 
 # I4
 def test_new_folder_updates_auto_output(qtbot, tmp_path):
-    w = MainWindow(fetch_on_start=False); qtbot.addWidget(w)
+    w = MainWindow(fetch_on_start=False, open_folder_on_finish=False); qtbot.addWidget(w)
     (tmp_path / "A").mkdir(); (tmp_path / "B").mkdir()
     w.set_source_dir(tmp_path / "A"); w.set_source_dir(tmp_path / "B")
-    assert w.output_edit.text().endswith("B.xlsx")
+    assert w.output_name_edit.text() == "B_出力"
 
 
 def test_user_chosen_output_is_kept(qtbot, tmp_path):
-    w = MainWindow(fetch_on_start=False); qtbot.addWidget(w)
+    w = MainWindow(fetch_on_start=False, open_folder_on_finish=False); qtbot.addWidget(w)
     (tmp_path / "A").mkdir(); (tmp_path / "B").mkdir()
-    w.set_source_dir(tmp_path / "A"); w.output_edit.setText(str(tmp_path / "mine.xlsx"))
+    w.set_source_dir(tmp_path / "A"); w.output_name_edit.setText("自分で付けた名前")
     w.set_source_dir(tmp_path / "B")
-    assert w.output_edit.text().endswith("mine.xlsx")
+    assert w.output_name_edit.text() == "自分で付けた名前"
 
 
 def test_existing_output_asks_before_overwrite(qtbot, tmp_path, monkeypatch):
     from PySide6.QtWidgets import QMessageBox
-    (tmp_path / "A").mkdir(); (tmp_path / "A.xlsx").write_text("x")
-    w = MainWindow(fetch_on_start=False); qtbot.addWidget(w)
+    (tmp_path / "A").mkdir(); (tmp_path / "A_出力").mkdir(); (tmp_path / "A_出力/A_出力.xlsx").write_text("x")
+    w = MainWindow(fetch_on_start=False, open_folder_on_finish=False); qtbot.addWidget(w)
     w.set_source_dir(tmp_path / "A")
     asked = Mock(return_value=QMessageBox.StandardButton.No)
     monkeypatch.setattr(QMessageBox, "question", asked)

@@ -14,6 +14,9 @@ from millsheet.pipeline import RunResult, outputs_for, review_messages
 from millsheet.settings import get_secret, load_settings
 
 
+INVALID_NAME_CHARS = ["/", "\\", ":", "*", "?", '"', "<", ">", "|"]
+
+
 class DropArea(QLabel):
     """PDF のフォルダをドロップする枠。"""
 
@@ -43,7 +46,7 @@ class DropArea(QLabel):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, fetch_on_start: bool = True):
+    def __init__(self, fetch_on_start: bool = True, open_folder_on_finish: bool = True):
         super().__init__()
         self.setWindowTitle("ミルシート読み取り")
         self.resize(820, 680)
@@ -53,18 +56,23 @@ class MainWindow(QMainWindow):
         self.worker = None
         self.master_worker = None
         self._master_workers: list = []   # 動いている間は参照を持ち続ける（途中で捨てると落ちる）
-        self._auto_output = ""            # 自動で入れた出力先（ユーザーが変えていなければフォルダに合わせて替える）
+        self._auto_name = ""              # 自動で入れたフォルダ名（ユーザーが変えていなければ PDF のフォルダに合わせて替える）
+        self._base_override: Path | None = None   # 「場所を変える…」で選んだ出力先（この実行だけ）
+        self.open_folder_on_finish = open_folder_on_finish
 
         self.drop = DropArea(self.set_source_dir)
         choose = QPushButton("フォルダを選ぶ…")
         choose.clicked.connect(self._choose_folder)
         self.source_label = QLabel("フォルダが選ばれていません")
 
-        self.output_edit = QLineEdit()
-        self.output_edit.setPlaceholderText("出力する xlsx")
-        self.output_edit.textChanged.connect(self._update_buttons)
-        browse = QPushButton("参照…")
-        browse.clicked.connect(self._choose_output)
+        self.output_name_edit = QLineEdit()
+        self.output_name_edit.setPlaceholderText("出力フォルダの名前")
+        self.output_name_edit.textChanged.connect(self._update_buttons)
+        browse = QPushButton("場所を変える…")
+        browse.clicked.connect(self._choose_output_base)
+        self.output_path_label = QLabel()
+        self.output_path_label.setWordWrap(True)
+        self.output_path_label.setStyleSheet("color: gray;")
 
         self.run_button = QPushButton("読み取りを実行")
         self.run_button.setDefault(True)
@@ -91,7 +99,7 @@ class MainWindow(QMainWindow):
         self.rebuild_button = QPushButton("マスタを読み直して作り直す")
         self.open_xlsx.clicked.connect(lambda: self._open(self.result.outputs.xlsx))
         self.open_pdf.clicked.connect(lambda: self._open(self.result.outputs.pdf))
-        self.open_folder.clicked.connect(lambda: self._open(self.result.outputs.xlsx.parent))
+        self.open_folder.clicked.connect(lambda: self._open(self.result.outputs.dir))
         self.open_sheet.clicked.connect(self._open_sheet)
         self.rebuild_button.clicked.connect(self._start_rebuild)
 
@@ -102,7 +110,7 @@ class MainWindow(QMainWindow):
         settings_button.clicked.connect(self._show_settings)
 
         src_row = QHBoxLayout(); src_row.addWidget(self.source_label, 1); src_row.addWidget(choose)
-        out_row = QHBoxLayout(); out_row.addWidget(QLabel("出力先")); out_row.addWidget(self.output_edit, 1)
+        out_row = QHBoxLayout(); out_row.addWidget(QLabel("出力フォルダ名")); out_row.addWidget(self.output_name_edit, 1)
         out_row.addWidget(browse)
         run_row = QHBoxLayout(); run_row.addWidget(self.run_button); run_row.addWidget(self.cancel_button)
         run_row.addWidget(self.progress, 1)
@@ -117,6 +125,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.drop)
         layout.addLayout(src_row)
         layout.addLayout(out_row)
+        layout.addWidget(self.output_path_label)
         layout.addLayout(run_row)
         layout.addWidget(self.status)
         layout.addWidget(self.notice)
@@ -135,60 +144,81 @@ class MainWindow(QMainWindow):
     def set_source_dir(self, folder: Path) -> None:
         self.source_dir = Path(folder)
         self.source_label.setText(str(self.source_dir))
-        if not self.output_edit.text() or self.output_edit.text() == self._auto_output:
-            out_dir = Path(load_settings().output_path or self.source_dir.parent)
-            self.set_output_path(out_dir / f"{self.source_dir.name}.xlsx")
-            self._auto_output = self.output_edit.text()
+        if not self.output_name_edit.text() or self.output_name_edit.text() == self._auto_name:
+            name = self.source_dir.name
+            if self._output_base() == self.source_dir.parent:
+                name += "_出力"   # PDF のフォルダの隣に置くので、同じ名前にならないようにする
+            self.output_name_edit.setText(name)
+            self._auto_name = name
         self._update_buttons()
 
-    def set_output_path(self, path: Path) -> None:
-        path = Path(path)
-        if path.suffix.lower() != ".xlsx":
-            path = path.with_name(path.name + ".xlsx")
-        self.output_edit.setText(str(path))
+    def _output_base(self) -> Path | None:
+        if self._base_override:
+            return self._base_override
+        configured = load_settings().output_path
+        if configured:
+            return Path(configured)
+        return self.source_dir.parent if self.source_dir else None
+
+    def output_dir(self) -> Path | None:
+        base, name = self._output_base(), self.output_name_edit.text().strip()
+        return base / name if base and name else None
+
+    def _output_problem(self) -> str | None:
+        name = self.output_name_edit.text().strip()
+        if not name:
+            return "出力フォルダの名前を入れてください"
+        if name in (".", "..") or any(c in name for c in INVALID_NAME_CHARS):
+            return f"フォルダの名前に次の文字は使えません: {' '.join(INVALID_NAME_CHARS)}"
+        out = self.output_dir()
+        if self.source_dir and out and (out == self.source_dir or self.source_dir in out.parents):
+            return "出力フォルダが PDF のフォルダの中になっています。場所か名前を変えてください"
+        return None
 
     def _choose_folder(self) -> None:
         d = QFileDialog.getExistingDirectory(self, "PDF のフォルダを選ぶ")
         if d:
             self.set_source_dir(Path(d))
 
-    def _choose_output(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(self, "出力する xlsx", self.output_edit.text(), "Excel (*.xlsx)")
-        if path:
-            self.set_output_path(Path(path))
+    def _choose_output_base(self) -> None:
+        d = QFileDialog.getExistingDirectory(self, "出力フォルダを作る場所", str(self._output_base() or ""))
+        if d:
+            self._base_override = Path(d)
+            self._update_buttons()
 
     def _busy(self) -> bool:
         return self.worker is not None and self.worker.isRunning()
 
     def _update_buttons(self) -> None:
         busy = self._busy()
-        self.run_button.setEnabled(not busy and self.source_dir is not None and bool(self.output_edit.text()))
+        problem = self._output_problem()
+        out = self.output_dir()
+        if self.source_dir is None:
+            self.output_path_label.setText("")
+        else:
+            self.output_path_label.setText(problem or f"出力先: {out}（この中に xlsx と PDF を作ります）")
+        self.run_button.setEnabled(not busy and self.source_dir is not None and problem is None)
         self.cancel_button.setEnabled(busy)
         has = self.result is not None
         self.open_xlsx.setEnabled(has and not busy)
         self.open_pdf.setEnabled(has and not busy and self.result.outputs.pdf is not None)
         self.open_folder.setEnabled(has and not busy)
-        out = self.output_edit.text()
-        self.rebuild_button.setEnabled(not busy and bool(out) and outputs_for(Path(out)).raw.exists())
+        self.rebuild_button.setEnabled(not busy and out is not None and outputs_for(out).raw.exists())
         self.open_sheet.setEnabled(bool(load_settings().sheet_url))
 
     # 実行
-    def _pipeline_kwargs(self) -> dict:
-        return dict(settings=load_settings(), xlsx=Path(self.output_edit.text()))
-
     def _start_run(self) -> None:
-        kw = self._pipeline_kwargs()
-        if kw["xlsx"].exists():
+        out = self.output_dir()
+        if outputs_for(out).xlsx.exists() or outputs_for(out).pdf.exists():
             answer = QMessageBox.question(self, "上書きの確認",
-                                          f"{kw['xlsx'].name} は既にあります。上書きしますか？\n"
-                                          "（同じ名前の PDF・JSON も上書きされます）")
+                                          f"出力フォルダ「{out.name}」には前の結果があります。上書きしますか？\n（{out}）")
             if answer != QMessageBox.StandardButton.Yes:
                 return
-        self._start(RunWorker("run", source_dir=self.source_dir, gemini_key=get_secret("gemini_api_key") or "", **kw))
+        self._start(RunWorker("run", source_dir=self.source_dir, out_dir=out, settings=load_settings(),
+                              gemini_key=get_secret("gemini_api_key") or ""))
 
     def _start_rebuild(self) -> None:
-        kw = self._pipeline_kwargs()
-        self._start(RunWorker("rebuild", raw=outputs_for(kw["xlsx"]).raw, **kw))
+        self._start(RunWorker("rebuild", out_dir=self.output_dir(), settings=load_settings()))
 
     def _start(self, worker: RunWorker) -> None:
         self.worker = worker
@@ -220,7 +250,11 @@ class MainWindow(QMainWindow):
         self.progress.setRange(0, 1)
         self.progress.setValue(1)
         messages = review_messages(result.records)
-        self.status.setText(f"完了: {len(result.records)} 行を出力しました（要確認 {len(messages)} 件）")
+        self.status.setText(f"完了: {len(result.records)} 行を出力しました（要確認 {len(messages)} 件）\n"
+                            f"出力フォルダ: {result.outputs.dir}")
+        self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        if self.open_folder_on_finish:
+            self._open(result.outputs.dir)
         self.notice.setText("\n".join(result.warnings + result.errors))
         self.review_list.addItems(messages or ["要確認の行はありません"])
 
