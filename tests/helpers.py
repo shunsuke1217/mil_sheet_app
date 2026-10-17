@@ -68,3 +68,33 @@ def make_pdf(path, n: int):
         page.insert_text((72, 72), f"{path.stem}-{i}")
     doc.save(path)
     return path
+
+
+def page_result(**line_kwargs):
+    from millsheet.schema import PageResult
+    return PageResult(is_certificate=True, stamp_valid_qty=None, lines=[line(**line_kwargs)])
+
+
+def png_hash(pdf, page_no: int) -> str:
+    import hashlib
+    from millsheet.extract import render_png
+    return hashlib.sha256(render_png(Path(pdf), page_no)).hexdigest()
+
+
+class FakeReader:
+    """呼ばれた回数を数える偽の読み取り。results（PNG の SHA-256 → 結果）があればそれを返す。"""
+
+    def __init__(self, results: dict | None = None, raise_error: Exception | None = None):
+        import threading
+        self.results = results or {}
+        self.raise_error = raise_error
+        self.calls = 0
+        self._lock = threading.Lock()
+
+    def read(self, png: bytes):
+        import hashlib
+        with self._lock:
+            self.calls += 1
+        if self.raise_error:
+            raise self.raise_error
+        return self.results.get(hashlib.sha256(png).hexdigest()) or page_result()
