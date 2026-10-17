@@ -1,8 +1,11 @@
+import os
 from pathlib import Path
 
 import keyring
 import pytest
 from keyring.backend import KeyringBackend
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 FIXTURES = Path(__file__).parent / "fixtures"
 SAMPLE_PDF = FIXTURES / "20261014084620.pdf"
