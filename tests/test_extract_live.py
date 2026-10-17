@@ -10,7 +10,7 @@ from tests.test_normalize import EXPECTED
 
 pytestmark = pytest.mark.skipif(not os.environ.get("GEMINI_API_KEY"), reason="GEMINI_API_KEY がありません")
 
-FIELDS = ["ページ", "品名", "材質", "寸法", "長さ", "本数", "単重", "重量"]
+FIELDS = ["ページ", "材種", "材質", "寸法", "長さ", "本数", "単重", "重量"]
 
 
 def test_sample_pdf_matches_acceptance_table(sample_pdf, fixture_master):

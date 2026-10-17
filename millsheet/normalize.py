@@ -46,7 +46,7 @@ class Record:
             "ページ": self.page_label or "—",
             "ファイル": self.file,
             "ページ番号": self.page_no,
-            "品名": self.category,
+            "材種": self.category,
             "材質": self.grade,
             "寸法": self.size,
             "長さ_mm": self.length_mm,
@@ -102,7 +102,7 @@ def _line_record(entry: PageEntry, ln: Line, master: Master, index: int, stamp_r
         reasons.append(R_NO_CIRCLE)
     elif ln.circle_status == "読めない":
         reasons.append(R_UNREADABLE)
-    required = [("品名", category), ("材質", ln.grade), ("寸法", size)]
+    required = [("材種", category), ("材質", ln.grade), ("寸法", size)]
     if not is_pl:
         required.append(("長さ", length))
     required.append(("本数", qty))

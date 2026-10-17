@@ -111,11 +111,11 @@ def test_certificate_with_no_lines_yields_review_row(fixture_master):
 
 def test_unknown_category_is_missing(fixture_master):
     r = build_records([page_with(line(commodity_raw="一般構造用形鋼", size_raw="65X65X6"))], fixture_master)[0]
-    assert r.category is None and r.size == "65×65×6" and R_MISSING.format("品名、ミルシート重量、重量") in r.reasons
+    assert r.category is None and r.size == "65×65×6" and R_MISSING.format("材種、ミルシート重量、重量") in r.reasons
 
 
 def test_to_dict_keys():
     d = rec(reasons=["x"]).to_dict()
-    assert list(d) == ["ページ", "ファイル", "ページ番号", "品名", "材質", "寸法",
+    assert list(d) == ["ページ", "ファイル", "ページ番号", "材種", "材質", "寸法",
                        "長さ_mm", "本数", "ミルシート重量", "重量", "要確認", "確認理由"]
     assert d["ページ"] == "—" and d["要確認"] is True and d["確認理由"] == ["x"]

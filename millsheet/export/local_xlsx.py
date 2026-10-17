@@ -7,7 +7,7 @@ from openpyxl.styles import Font, PatternFill
 from millsheet.export.base import save_atomic
 
 COLUMNS = [  # (見出し, レコードのキー)
-    ("ページ", "ページ"), ("品名", "品名"), ("材質", "材質"), ("寸法", "寸法"), ("長さ(mm)", "長さ_mm"),
+    ("ページ", "ページ"), ("材種", "材種"), ("材質", "材質"), ("寸法", "寸法"), ("長さ(mm)", "長さ_mm"),
     ("本数", "本数"), ("ミルシート重量(kg/m)", "ミルシート重量"), ("重量(kg)", "重量"),
     ("要確認", "要確認"), ("確認理由", "確認理由"),
 ]
@@ -39,7 +39,7 @@ class LocalXlsxExporter:
                 cell = ws.cell(row_no, col, v)
                 if col in NUMBER_FORMAT_COLUMNS:
                     cell.number_format = "#,##0"
-                pl_blank = rec.get("品名") == "PL" and col in PL_BLANK_COLUMNS
+                pl_blank = rec.get("材種") == "PL" and col in PL_BLANK_COLUMNS
                 if v is None and col in VALUE_COLUMNS and not pl_blank:
                     cell.fill = RED
                 elif rec.get("要確認"):

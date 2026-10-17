@@ -11,7 +11,7 @@ from millsheet.export.json_out import write_json
 from millsheet.export.local_xlsx import LocalXlsxExporter
 from millsheet.rawfile import read_raw, write_raw
 
-HEADER = ["ページ", "品名", "材質", "寸法", "長さ(mm)", "本数", "ミルシート重量(kg/m)", "重量(kg)", "要確認", "確認理由"]
+HEADER = ["ページ", "材種", "材質", "寸法", "長さ(mm)", "本数", "ミルシート重量(kg/m)", "重量(kg)", "要確認", "確認理由"]
 
 
 def _rgb(cell):
