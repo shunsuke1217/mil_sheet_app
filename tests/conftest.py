@@ -50,22 +50,11 @@ def sample_pdf():
     return SAMPLE_PDF
 
 
-def _load_raw_pages(path):
-    # Task 7 で rawfile.read_raw に置き換える
-    import json
-    from millsheet.schema import PageEntry, PageResult
-    data = json.loads(Path(path).read_text("utf-8"))
-    out = []
-    for file in sorted(data["pages"]):
-        for e in data["pages"][file]:
-            r = e["result"]
-            out.append(PageEntry(file, e["page"], PageResult.model_validate(r) if r else None, e.get("error")))
-    return out
-
 
 @pytest.fixture
 def sample_pages():
-    return _load_raw_pages(FIXTURES / "sample_raw.json")
+    from millsheet.rawfile import read_raw
+    return read_raw(FIXTURES / "sample_raw.json")[1]
 
 
 @pytest.fixture
@@ -78,3 +67,18 @@ def fixture_master():
 def sample_records(sample_pages, fixture_master):
     from millsheet.normalize import build_records
     return build_records(sample_pages, fixture_master)
+
+
+@pytest.fixture
+def ordered_sample_dicts(sample_records):
+    """例外サンプルも含めて全部を 1 回で並べたもの。"""
+    from millsheet.ordering import order_records
+    return [r.to_dict() for r in order_records(sample_records)[0]]
+
+
+@pytest.fixture
+def two_pdfs(tmp_path):
+    from tests.helpers import make_pdf
+    make_pdf(tmp_path / "A.pdf", 2)
+    make_pdf(tmp_path / "sub/B.pdf", 1)
+    return tmp_path

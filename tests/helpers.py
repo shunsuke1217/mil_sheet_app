@@ -55,3 +55,16 @@ def rec(**kw):
              unit_weight=49.9, weight=574, reasons=kw.pop("reasons", []), input_index=i)
     d.update(kw)
     return Record(**d)
+
+
+def make_pdf(path, n: int):
+    """各ページに "{stem}-{n}" と書いた PDF を作る。"""
+    import pymupdf
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    doc = pymupdf.open()
+    for i in range(1, n + 1):
+        page = doc.new_page()
+        page.insert_text((72, 72), f"{path.stem}-{i}")
+    doc.save(path)
+    return path
