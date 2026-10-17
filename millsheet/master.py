@@ -1,5 +1,6 @@
-"""単重マスタ（SPEC 7章）。Google スプレッドシートを API キーで読む。"""
+"""単重マスタ（SPEC 7章）。リンク共有した Google スプレッドシートを CSV として読む（API キー不要）。"""
 import csv
+import io
 import json
 import logging
 import os
@@ -9,17 +10,15 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
-from urllib.parse import quote
 
 import httpx
 
 from millsheet import paths
-from millsheet.applog import mask
 from millsheet.sizes import size_key
 
 log = logging.getLogger(__name__)
 
-SHEETS_API = "https://sheets.googleapis.com/v4/spreadsheets"
+EXPORT_URL = "https://docs.google.com/spreadsheets/d/{id}/export"
 HEADERS = ("品名", "サイズ", "単重")
 
 
@@ -135,48 +134,52 @@ def _read_cache() -> Master | None:
         return None
 
 
-def _http_error_message(status: int, body: str, sheet_name: str) -> str:
-    if status == 400 and ("API key not valid" in body or "API_KEY_INVALID" in body):
-        return "Google の API キーが正しくありません"
-    if status == 400 and "Unable to parse range" in body:
-        return f"シート名「{sheet_name}」が見つかりません"
-    if status == 403:
-        return ("読み取りが許可されていません。共有設定が「リンクを知っている全員が閲覧可」か、"
-                "API キーで Google Sheets API が使えるかを確認してください")
-    if status == 404:
-        return "スプレッドシートが見つかりません。URL を確認してください"
-    return f"スプレッドシートを読めませんでした（HTTP {status}）"
+def gid_from_url(url: str) -> str | None:
+    """URL の #gid=… / ?gid=…（開いていたタブ）を取り出す。"""
+    m = re.search(r"[#?&]gid=(\d+)", url)
+    return m.group(1) if m else None
 
 
-def _fetch_values(sheet_id: str, sheet_name: str, api_key: str, client: httpx.Client) -> list[list]:
-    rng = f"'{sheet_name.replace(chr(39), chr(39) * 2)}'!A:Z" if sheet_name else "A:Z"
-    url = f"{SHEETS_API}/{sheet_id}/values/{quote(rng, safe='')}"
-    try:
-        r = client.get(url, params={"key": api_key, "valueRenderOption": "UNFORMATTED_VALUE"}, timeout=15)
-    except httpx.HTTPError as e:
-        log.warning("スプレッドシートに接続できません: %s", mask(str(e), [api_key]))
-        raise MasterFetchError("ネットに接続できません") from None
-    if r.status_code != 200:
-        log.warning("スプレッドシートの取得に失敗: HTTP %s %s", r.status_code, mask(r.text[:300], [api_key]))
-        raise MasterFetchError(_http_error_message(r.status_code, r.text, sheet_name))
-    return r.json().get("values", [])
-
-
-def fetch_master(url: str, sheet_name: str, api_key: str, *,
-                 client: httpx.Client | None = None) -> tuple[Master, list[str]]:
+def _fetch_rows(url: str, client: httpx.Client) -> list[list[str]]:
     sheet_id = spreadsheet_id_from_url(url)
-    if not api_key:
-        raise MasterFetchError("設定画面で Google の API キーを入力してください")
+    export = f"{EXPORT_URL.format(id=sheet_id)}?format=csv"
+    gid = gid_from_url(url)
+    if gid:
+        export += f"&gid={gid}"
+    try:
+        r = client.get(export, follow_redirects=True, timeout=15)
+    except httpx.HTTPError as e:
+        log.warning("スプレッドシートに接続できません: %s", e)
+        raise MasterFetchError("ネットに接続できません") from None
+    if r.status_code == 404:
+        raise MasterFetchError("スプレッドシートが見つかりません。URL を確認してください")
+    if r.status_code == 400:
+        raise MasterFetchError("URL のタブが見つかりません。単重のタブを開いた状態の URL を貼り直してください")
+    if r.url.host == "accounts.google.com" or "text/html" in r.headers.get("content-type", ""):
+        # 共有されていないシートは Google のログイン画面（HTML）が返る
+        raise MasterFetchError("スプレッドシートが共有されていません。共有設定を「リンクを知っている全員」（閲覧者）にしてください")
+    if r.status_code != 200:
+        log.warning("スプレッドシートの取得に失敗: HTTP %s", r.status_code)
+        raise MasterFetchError(f"スプレッドシートを読めませんでした（HTTP {r.status_code}）")
+    text = r.content.decode("utf-8-sig")
+    return list(csv.reader(io.StringIO(text)))
+
+
+def fetch_master(url: str, *, client: httpx.Client | None = None) -> tuple[Master, list[str]]:
+    """共有設定が「リンクを知っている全員」のスプレッドシートを、CSV として読む（API キー不要）。"""
+    if not url.strip():
+        raise MasterFetchError("設定画面で単重マスタのスプレッドシートの URL を入力してください")
+    spreadsheet_id_from_url(url)   # URL の形が違えばここで止める（キャッシュには逃げない）
     client = client or httpx.Client()
     try:
-        values = _fetch_values(sheet_id, sheet_name.strip(), api_key, client)
+        rows = _fetch_rows(url, client)
     except MasterFetchError as e:
         cached = _read_cache()
         if cached is None:
             raise
         when = cached.fetched_at.strftime("%Y-%m-%d %H:%M")
         return cached, [f"スプレッドシートを読めなかったため、前回取得した単重（{when}）を使います: {e}"]
-    m = Master(parse_sheet_values(values), "sheet", datetime.now())
+    m = Master(parse_sheet_values(rows), "sheet", datetime.now())
     _write_cache(m)
     log.info("単重マスタを取得しました: %s 件", len(m.entries))
     return m, []

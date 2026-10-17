@@ -12,7 +12,7 @@ from millsheet.settings import Settings
 from tests.conftest import _fixture_master_loader
 from tests.helpers import FakeReader, make_pdf, page_result, png_hash, rec
 
-KW = dict(settings=Settings(), gemini_key="g", google_key="k")
+KW = dict(settings=Settings(), gemini_key="g")
 
 
 def test_outputs_for(tmp_path):
@@ -31,7 +31,7 @@ def test_run_writes_all_outputs(tmp_path, sample_folder, fake_reader, fixture_ma
 def test_rebuild_does_not_call_reader(tmp_path, sample_folder, fake_reader, fixture_master_loader):
     run(sample_folder, tmp_path / "out.xlsx", reader=fake_reader, master_loader=fixture_master_loader, **KW)
     n = fake_reader.calls
-    res = rebuild(tmp_path / "out_raw.json", tmp_path / "out.xlsx", settings=Settings(), google_key="k",
+    res = rebuild(tmp_path / "out_raw.json", tmp_path / "out.xlsx", settings=Settings(),
                   master_loader=fixture_master_loader)
     assert fake_reader.calls == n and len(res.records) == 10 and res.outputs.pdf.exists()
 
@@ -49,7 +49,7 @@ def test_master_failure_stops_before_reading(tmp_path):
 
 def test_missing_keys_are_reported(tmp_path):
     with pytest.raises(ValueError, match="Gemini"):
-        run(tmp_path, tmp_path / "o.xlsx", settings=Settings(), gemini_key="", google_key="k",
+        run(tmp_path, tmp_path / "o.xlsx", settings=Settings(), gemini_key="",
             reader=None, master_loader=_fixture_master_loader)
 
 
@@ -62,7 +62,7 @@ def test_run_reports_locked_output_and_keeps_raw(tmp_path, monkeypatch):
 
 
 def test_rebuild_without_source_pdf(tmp_path):
-    res = rebuild(Path("tests/fixtures/sample_raw.json"), tmp_path / "o.xlsx", settings=Settings(), google_key="k",
+    res = rebuild(Path("tests/fixtures/sample_raw.json"), tmp_path / "o.xlsx", settings=Settings(),
                   master_loader=_fixture_master_loader)
     assert res.outputs.pdf is None and "元の PDF" in res.errors[0] and res.outputs.xlsx.exists()
 

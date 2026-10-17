@@ -36,10 +36,15 @@ def test_settings_dialog_saves_without_writing_keys_to_file(qtbot, data_dir):
 
 def test_settings_dialog_blank_key_keeps_existing(qtbot):
     from millsheet.settings import set_secret
-    set_secret("google_api_key", "OLD")
+    set_secret("gemini_api_key", "OLD")
     d = SettingsDialog(); qtbot.addWidget(d)
     d.accept()
-    assert get_secret("google_api_key") == "OLD"
+    assert get_secret("gemini_api_key") == "OLD"
+
+
+def test_settings_dialog_needs_only_gemini_key_and_sheet_url(qtbot):
+    d = SettingsDialog(); qtbot.addWidget(d)
+    assert not hasattr(d, "google_key_edit") and not hasattr(d, "sheet_name_edit")
 
 
 def test_master_dialog_filters(qtbot):
@@ -58,7 +63,7 @@ def test_run_worker_rebuild_emits_result(qtbot, tmp_path):
     from tests.conftest import _fixture_master_loader
     shutil.copy("tests/fixtures/sample_raw.json", tmp_path / "o_raw.json")
     w = RunWorker("rebuild", raw=tmp_path / "o_raw.json", xlsx=tmp_path / "o.xlsx", settings=Settings(),
-                  google_key="", master_loader=_fixture_master_loader)
+                  master_loader=_fixture_master_loader)
     with qtbot.waitSignal(w.finished_ok, timeout=10000) as sig:
         w.start()
     assert len(sig.args[0].records) == 13 and (tmp_path / "o.xlsx").exists()
@@ -68,7 +73,7 @@ def test_run_worker_reports_friendly_error(qtbot, tmp_path):
     from gui.worker import RunWorker
     from millsheet.settings import Settings
     w = RunWorker("run", source_dir=tmp_path, xlsx=tmp_path / "o.xlsx", settings=Settings(),
-                  gemini_key="", google_key="")
+                  gemini_key="")
     with qtbot.waitSignal(w.failed, timeout=10000) as sig:
         w.start()
     assert "Gemini の API キー" in sig.args[0]
@@ -87,8 +92,8 @@ def test_review_list_copy(qtbot):
 def test_refresh_master_twice_keeps_running_worker(qtbot, monkeypatch, data_dir):
     import time as _t
     from gui import worker as wmod
-    from millsheet.settings import Settings, save_settings, set_secret
-    save_settings(Settings(sheet_url="https://docs.google.com/spreadsheets/d/x/edit")); set_secret("google_api_key", "k")
+    from millsheet.settings import Settings, save_settings
+    save_settings(Settings(sheet_url="https://docs.google.com/spreadsheets/d/x/edit"))
     monkeypatch.setattr(wmod.MasterWorker, "run", lambda self: _t.sleep(0.3))
     w = MainWindow(fetch_on_start=False); qtbot.addWidget(w)
     w.refresh_master(); first = w.master_worker

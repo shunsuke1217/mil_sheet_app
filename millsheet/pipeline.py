@@ -54,14 +54,12 @@ def _locked_message(e: OutputLockedError) -> str:
     return f"{e.path.name} が他のアプリで開かれています。閉じてから『作り直す』を押してください"
 
 
-def _master_loader(settings: Settings, google_key: str, master_loader: MasterLoader | None) -> MasterLoader:
+def _master_loader(settings: Settings, master_loader: MasterLoader | None) -> MasterLoader:
     if master_loader:
         return master_loader
     if not settings.sheet_url:
         raise ValueError("設定画面で単重マスタのスプレッドシートの URL を入力してください")
-    if not google_key:
-        raise ValueError("設定画面で Google の API キーを入力してください")
-    return lambda: fetch_master(settings.sheet_url, settings.sheet_name, google_key)
+    return lambda: fetch_master(settings.sheet_url)
 
 
 def _build_and_export(pages: list[PageEntry], source_dir: Path | None, outputs: Outputs, master: Master,
@@ -99,14 +97,14 @@ def _build_and_export(pages: list[PageEntry], source_dir: Path | None, outputs: 
     return RunResult(ordered, outputs, master, warnings, errors)
 
 
-def run(source_dir: Path, xlsx: Path, *, settings: Settings, gemini_key: str, google_key: str,
+def run(source_dir: Path, xlsx: Path, *, settings: Settings, gemini_key: str,
         reader: PageReader | None = None, workers: int = 4, master_loader: MasterLoader | None = None,
         on_progress: Callable[[str, int, int, int, int], None] = lambda *a: None,
         cancel: threading.Event | None = None) -> RunResult:
     source_dir = Path(source_dir)
     if reader is None and not gemini_key:
         raise ValueError("設定画面で Gemini の API キーを入力してください")
-    loader = _master_loader(settings, google_key, master_loader)
+    loader = _master_loader(settings, master_loader)
     if not list_pdfs(source_dir):
         raise ValueError(f"フォルダに PDF がありません: {source_dir}")
     Path(xlsx).parent.mkdir(parents=True, exist_ok=True)   # 読み終えてから保存できないのを防ぐ
@@ -119,9 +117,9 @@ def run(source_dir: Path, xlsx: Path, *, settings: Settings, gemini_key: str, go
     return _build_and_export(pages, source_dir, outputs, master, list(warnings), settings)
 
 
-def rebuild(raw: Path, xlsx: Path, *, settings: Settings, google_key: str,
+def rebuild(raw: Path, xlsx: Path, *, settings: Settings,
             master_loader: MasterLoader | None = None) -> RunResult:
-    loader = _master_loader(settings, google_key, master_loader)
+    loader = _master_loader(settings, master_loader)
     master, warnings = loader()
     source_dir, pages = read_raw(raw)
     log.info("作り直します: %s → %s", raw, xlsx)

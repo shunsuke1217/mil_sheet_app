@@ -10,13 +10,12 @@ from millsheet import paths
 
 log = logging.getLogger(__name__)
 
-SecretName = Literal["gemini_api_key", "google_api_key"]
+SecretName = Literal["gemini_api_key"]
 
 
 @dataclass
 class Settings:
-    sheet_url: str = ""
-    sheet_name: str = ""
+    sheet_url: str = ""          # 単重マスタのスプレッドシート（単重のタブを開いた状態の URL）
     output_path: str = ""
     exporter: str = "local_xlsx"
 

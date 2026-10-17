@@ -1,13 +1,12 @@
 from pathlib import Path
-from urllib.parse import unquote
 
 import httpx
 import pytest
 
 from millsheet.master import (MasterFetchError, MasterValidationError, export_bundled_csv, fetch_master,
-                              load_master_file, parse_sheet_values, spreadsheet_id_from_url)
+                              gid_from_url, load_master_file, parse_sheet_values, spreadsheet_id_from_url)
 from millsheet.paths import master_cache_path
-from tests.helpers import URL, VALUES, client_raising, client_returning
+from tests.helpers import URL, VALUES, client_csv, client_login_page, client_raising, to_csv
 
 
 def test_spreadsheet_id_from_url():
@@ -48,50 +47,60 @@ def test_parse_sheet_values_missing_header():
         parse_sheet_values([["サイズ", "単重"], ["Ｈ-1×1×1×1", "1"]])
 
 
-def test_fetch_master_success_writes_cache():
+def test_fetch_master_reads_csv_of_the_tab_in_the_url_and_writes_cache():
     seen = []
-    m, warnings = fetch_master(URL, "単重 'マスタ'", "KEY", client=client_returning(200, {"values": VALUES}, seen))
+    m, warnings = fetch_master(URL, client=client_csv(to_csv(VALUES), seen=seen))
     assert m.source == "sheet" and warnings == [] and master_cache_path().exists() and len(m.entries) == 225
-    url = unquote(str(seen[0].url))
-    assert "/spreadsheets/TESTID/values/'単重 ''マスタ'''!A:Z" in url and "valueRenderOption=UNFORMATTED_VALUE" in url
+    assert str(seen[0].url) == "https://docs.google.com/spreadsheets/d/TESTID/export?format=csv&gid=123"
 
 
-def test_fetch_master_without_sheet_name_uses_first_sheet():
+def test_fetch_master_without_gid_reads_first_tab():
     seen = []
-    fetch_master(URL, "", "KEY", client=client_returning(200, {"values": VALUES}, seen))
-    assert "/values/A%3AZ" in str(seen[0].url)
+    fetch_master("https://docs.google.com/spreadsheets/d/TESTID/edit", client=client_csv(to_csv(VALUES), seen=seen))
+    assert str(seen[0].url) == "https://docs.google.com/spreadsheets/d/TESTID/export?format=csv"
+
+
+def test_gid_from_url():
+    assert gid_from_url("https://docs.google.com/spreadsheets/d/X/edit#gid=0") == "0"
+    assert gid_from_url("https://docs.google.com/spreadsheets/d/X/edit?gid=55#gid=55") == "55"
+    assert gid_from_url("https://docs.google.com/spreadsheets/d/X/edit") is None
 
 
 def test_fetch_master_falls_back_to_cache():
-    fetch_master(URL, "", "KEY", client=client_returning(200, {"values": VALUES}))
-    m, warnings = fetch_master(URL, "", "KEY", client=client_raising(httpx.ConnectError("x")))
+    fetch_master(URL, client=client_csv(to_csv(VALUES)))
+    m, warnings = fetch_master(URL, client=client_raising(httpx.ConnectError("x")))
     assert m.source == "cache" and len(m.entries) == 225
     assert "前回取得した単重" in warnings[0] and "ネットに接続できません" in warnings[0]
 
 
-def test_fetch_master_no_cache_403_message():
-    with pytest.raises(MasterFetchError, match="共有設定"):
-        fetch_master(URL, "", "KEY", client=client_returning(403, {}))
+def test_not_shared_sheet_message():
+    with pytest.raises(MasterFetchError, match="リンクを知っている全員"):
+        fetch_master(URL, client=client_login_page())
 
 
-def test_fetch_master_404_and_bad_range_messages():
+def test_not_found_html_page_is_not_reported_as_sharing_problem():
+    # 実際の Google は存在しない ID に 404 と HTML を返す
     with pytest.raises(MasterFetchError, match="URL を確認"):
-        fetch_master(URL, "", "KEY", client=client_returning(404, {}))
-    with pytest.raises(MasterFetchError, match="シート名「x」"):
-        fetch_master(URL, "x", "KEY", client=client_returning(400, {"error": {"message": "Unable to parse range: x"}}))
+        fetch_master(URL, client=client_csv("<html>", status=404, content_type="text/html; charset=utf-8"))
+
+
+def test_not_found_messages():
+    with pytest.raises(MasterFetchError, match="URL を確認"):
+        fetch_master(URL, client=client_csv("", status=404))
+    with pytest.raises(MasterFetchError, match="タブ"):
+        fetch_master(URL, client=client_csv("", status=400))
 
 
 def test_fetch_master_validation_error_does_not_use_cache():
-    fetch_master(URL, "", "KEY", client=client_returning(200, {"values": VALUES}))
+    fetch_master(URL, client=client_csv(to_csv(VALUES)))
     with pytest.raises(MasterValidationError):
-        fetch_master(URL, "", "KEY", client=client_returning(
-            200, {"values": [["品名", "サイズ", "単重"], ["H", "Ｈ-1×1×1×1", "0"]]}))
+        fetch_master(URL, client=client_csv(to_csv([["品名", "サイズ", "単重"], ["H", "Ｈ-1×1×1×1", "0"]])))
 
 
-def test_error_messages_never_contain_key():
-    with pytest.raises(MasterFetchError) as e:
-        fetch_master(URL, "", "AIzaSECRET", client=client_returning(400, {"error": {"message": "API key not valid"}}))
-    assert "AIzaSECRET" not in str(e.value) and "API キー" in str(e.value)
+def test_csv_with_bom_and_formatted_numbers():
+    text = "\ufeff" + to_csv([["品名", "サイズ", "単重"], ["PL", "PL-50", "1,234"], ["H形鋼", "Ｈ-200×200×8×12", "49.9"]])
+    m, _ = fetch_master(URL, client=client_csv(text))
+    assert [e.unit_weight for e in m.entries] == [1234, 49.9]
 
 
 def test_lookup_returns_master_entry():

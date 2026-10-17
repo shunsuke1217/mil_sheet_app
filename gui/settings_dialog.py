@@ -18,11 +18,11 @@ class SettingsDialog(QDialog):
         self.settings = load_settings()
 
         self.gemini_key_edit = self._key_edit("gemini_api_key")
-        self.google_key_edit = self._key_edit("google_api_key")
         self.sheet_url_edit = QLineEdit(self.settings.sheet_url)
-        self.sheet_url_edit.setPlaceholderText("https://docs.google.com/spreadsheets/d/…/edit")
-        self.sheet_name_edit = QLineEdit(self.settings.sheet_name)
-        self.sheet_name_edit.setPlaceholderText("空欄なら先頭のシート")
+        self.sheet_url_edit.setPlaceholderText("単重のタブを開いた状態のアドレスを貼る（https://docs.google.com/spreadsheets/d/…）")
+        sheet_hint = QLabel("スプレッドシートの共有設定を「リンクを知っている全員」（閲覧者）にしてください。API キーは不要です。")
+        sheet_hint.setWordWrap(True)
+        sheet_hint.setStyleSheet("color: gray;")
         self.output_path_edit = QLineEdit(self.settings.output_path)
         self.output_path_edit.setPlaceholderText("xlsx を保存するフォルダ（空欄なら PDF のフォルダの隣）")
         browse = QPushButton("参照…")
@@ -33,9 +33,8 @@ class SettingsDialog(QDialog):
 
         form = QFormLayout()
         form.addRow("Gemini の API キー", self.gemini_key_edit)
-        form.addRow("Google の API キー", self.google_key_edit)
         form.addRow("単重マスタの URL", self.sheet_url_edit)
-        form.addRow("シート名", self.sheet_name_edit)
+        form.addRow("", sheet_hint)
         form.addRow("出力先のフォルダ", out_row)
 
         self.test_button = QPushButton("接続を確かめる")
@@ -71,13 +70,10 @@ class SettingsDialog(QDialog):
         if d:
             self.output_path_edit.setText(d)
 
-    def _google_key(self) -> str:
-        return self.google_key_edit.text().strip() or get_secret("google_api_key") or ""
-
     def _test_connection(self) -> None:
         QGuiApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
-            master, warnings = fetch_master(self.sheet_url_edit.text(), self.sheet_name_edit.text(), self._google_key())
+            master, warnings = fetch_master(self.sheet_url_edit.text())
             text = f"{len(master.entries)} 件の単重を取得できました"
             self.test_result.setText("\n".join([text, *warnings]))
         except (MasterFetchError, MasterValidationError) as e:
@@ -93,11 +89,9 @@ class SettingsDialog(QDialog):
                                     f"{path}\nを書き出しました。スプレッドシートの「ファイル → インポート」で読み込んでください。")
 
     def accept(self) -> None:
-        for edit, name in ((self.gemini_key_edit, "gemini_api_key"), (self.google_key_edit, "google_api_key")):
-            if edit.text().strip():
-                set_secret(name, edit.text().strip())
+        if self.gemini_key_edit.text().strip():
+            set_secret("gemini_api_key", self.gemini_key_edit.text().strip())
         self.settings.sheet_url = self.sheet_url_edit.text().strip()
-        self.settings.sheet_name = self.sheet_name_edit.text().strip()
         self.settings.output_path = self.output_path_edit.text().strip()
         save_settings(self.settings)
         super().accept()

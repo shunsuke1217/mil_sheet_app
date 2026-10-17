@@ -57,13 +57,13 @@ class MasterWorker(QThread):
     finished_ok = Signal(object, list)    # Master, 警告
     failed = Signal(str)
 
-    def __init__(self, url: str, sheet_name: str, api_key: str):
+    def __init__(self, url: str):
         super().__init__()
-        self.args = (url, sheet_name, api_key)
+        self.url = url
 
     def run(self) -> None:
         try:
-            master, warnings = fetch_master(*self.args)
+            master, warnings = fetch_master(self.url)
             self.finished_ok.emit(master, warnings)
         except Exception as e:
             self.failed.emit(friendly_error(e))

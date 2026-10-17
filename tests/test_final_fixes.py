@@ -124,6 +124,6 @@ def test_unreadable_file_hash_becomes_file_error(tmp_path, monkeypatch):
 # Minor（取り返しがつかないので修正）: 出力先のフォルダが無くても raw を保存する
 def test_missing_output_dir_is_created(tmp_path):
     make_pdf(tmp_path / "src/a.pdf", 1)
-    res = run(tmp_path / "src", tmp_path / "new/dir/o.xlsx", settings=Settings(), gemini_key="g", google_key="k",
+    res = run(tmp_path / "src", tmp_path / "new/dir/o.xlsx", settings=Settings(), gemini_key="g",
               reader=FakeReader(), master_loader=_fixture_master_loader)
     assert res.outputs.raw.exists() and res.outputs.xlsx.exists()

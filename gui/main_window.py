@@ -174,8 +174,7 @@ class MainWindow(QMainWindow):
 
     # 実行
     def _pipeline_kwargs(self) -> dict:
-        return dict(settings=load_settings(), google_key=get_secret("google_api_key") or "",
-                    xlsx=Path(self.output_edit.text()))
+        return dict(settings=load_settings(), xlsx=Path(self.output_edit.text()))
 
     def _start_run(self) -> None:
         kw = self._pipeline_kwargs()
@@ -234,12 +233,11 @@ class MainWindow(QMainWindow):
     # マスタ
     def refresh_master(self) -> None:
         s = load_settings()
-        key = get_secret("google_api_key") or ""
-        if not s.sheet_url or not key:
-            self.master_label.setText("単重マスタ: 設定画面でスプレッドシートの URL と Google の API キーを入力してください")
+        if not s.sheet_url:
+            self.master_label.setText("単重マスタ: 設定画面でスプレッドシートの URL を入力してください")
             return
         self.master_label.setText("単重マスタ: 取得中…")
-        worker = MasterWorker(s.sheet_url, s.sheet_name, key)
+        worker = MasterWorker(s.sheet_url)
         worker.finished_ok.connect(lambda m, w, me=worker: me is self.master_worker and self._on_master(m, w))
         worker.failed.connect(lambda m, me=worker: me is self.master_worker and
                               self.master_label.setText(f"単重マスタ: {m}"))
@@ -268,7 +266,7 @@ class MainWindow(QMainWindow):
         from millsheet.master import MasterFetchError, MasterValidationError, fetch_master
         s = load_settings()
         try:
-            self.master, warnings = fetch_master(s.sheet_url, s.sheet_name, get_secret("google_api_key") or "")
+            self.master, warnings = fetch_master(s.sheet_url)
         except (MasterFetchError, MasterValidationError) as e:
             QMessageBox.warning(self, "単重マスタ", str(e))
             return None
