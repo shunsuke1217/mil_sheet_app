@@ -20,8 +20,8 @@ def test_fixture_raw_matches_schema():
 def test_bundled_master_has_225_entries_with_category():
     data = json.loads(Path("millsheet/unit_weights.json").read_text("utf-8"))
     assert len(data) == 225
-    assert {"品名", "サイズ", "単重"} == set(data[0])
-    assert {d["品名"] for d in data} == {"H形鋼", "溝形鋼", "Cチャン", "アングル", "コラム/STKR", "FB", "PL"}
+    assert {"材種", "サイズ", "単重"} == set(data[0])
+    assert {d["材種"] for d in data} == {"H形鋼", "溝形鋼", "Cチャン", "アングル", "コラム/STKR", "FB", "PL"}
 
 
 def test_data_dir_created_and_overridable(tmp_path, monkeypatch):

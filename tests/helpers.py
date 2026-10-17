@@ -7,8 +7,8 @@ import httpx
 FIXTURES = Path(__file__).parent / "fixtures"
 
 URL = "https://docs.google.com/spreadsheets/d/TESTID/edit#gid=123"
-VALUES = [["品名", "サイズ", "単重"]] + [
-    [e["品名"], e["サイズ"], str(e["単重"])]
+VALUES = [["材種", "サイズ", "単重"]] + [
+    [e["材種"], e["サイズ"], str(e["単重"])]
     for e in json.loads((FIXTURES / "unit_weights.json").read_text("utf-8"))
 ]
 

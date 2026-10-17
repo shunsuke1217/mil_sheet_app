@@ -19,7 +19,7 @@ from millsheet.sizes import size_key
 log = logging.getLogger(__name__)
 
 EXPORT_URL = "https://docs.google.com/spreadsheets/d/{id}/export"
-HEADERS = ("品名", "サイズ", "単重")
+HEADERS = ("材種", "サイズ", "単重")
 
 
 @dataclass
@@ -84,7 +84,7 @@ def parse_sheet_values(values: list[list]) -> list[MasterEntry]:
         if not any(_cell(v) for v in row):
             continue
         get = lambda h: row[col[h]] if col[h] < len(row) else None  # noqa: E731
-        category, size_text, weight = _cell(get("品名")), str(get("サイズ") or "").strip(), get("単重")
+        category, size_text, weight = _cell(get("材種")), str(get("サイズ") or "").strip(), get("単重")
         try:
             uw = float(weight) if isinstance(weight, (int, float)) else float(_cell(weight).replace(",", ""))
         except ValueError:
@@ -107,11 +107,11 @@ def parse_sheet_values(values: list[list]) -> list[MasterEntry]:
 
 
 def _entries_to_json(entries: list[MasterEntry]) -> list[dict]:
-    return [{"品名": e.category, "サイズ": e.size, "単重": e.unit_weight} for e in entries]
+    return [{"材種": e.category, "サイズ": e.size, "単重": e.unit_weight} for e in entries]
 
 
 def _entries_from_json(data: list[dict]) -> list[MasterEntry]:
-    return [MasterEntry(d["品名"], d["サイズ"], float(d["単重"])) for d in data]
+    return [MasterEntry(d["材種"], d["サイズ"], float(d["単重"])) for d in data]
 
 
 def _write_cache(m: Master) -> None:
@@ -196,4 +196,4 @@ def export_bundled_csv(path: Path) -> None:
         w = csv.writer(f)
         w.writerow(HEADERS)
         for d in data:
-            w.writerow([d["品名"], d["サイズ"], d["単重"]])
+            w.writerow([d["材種"], d["サイズ"], d["単重"]])

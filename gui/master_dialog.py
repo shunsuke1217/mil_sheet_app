@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (QComboBox, QDialog, QHBoxLayout, QHeaderView, QLa
 
 from millsheet.master import Master
 
-ALL = "すべての品名"
+ALL = "すべての材種"
 
 
 class MasterDialog(QDialog):
@@ -24,7 +24,7 @@ class MasterDialog(QDialog):
         self.search_edit.setPlaceholderText("サイズで検索（例: 200×200）")
         self.category_combo = QComboBox()
         self.table = QTableWidget(0, 3)
-        self.table.setHorizontalHeaderLabels(["品名", "サイズ", "単重(kg/m)"])
+        self.table.setHorizontalHeaderLabels(["材種", "サイズ", "単重(kg/m)"])
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.info = QLabel()

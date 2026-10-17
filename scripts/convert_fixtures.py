@@ -41,7 +41,7 @@ def category_of(size):
 
 def convert_master():
     src = json.loads((ROOT / "unit_weights.json").read_text("utf-8"))
-    data = [{"品名": category_of(e["size"]), "サイズ": e["size"], "単重": e["unit_weight"]} for e in src]
+    data = [{"材種": category_of(e["size"]), "サイズ": e["size"], "単重": e["unit_weight"]} for e in src]
     text = json.dumps(data, ensure_ascii=False, indent=1)
     (ROOT / "millsheet/unit_weights.json").write_text(text, "utf-8")
     (ROOT / "tests/fixtures/unit_weights.json").write_text(text, "utf-8")

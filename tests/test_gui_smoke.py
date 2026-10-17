@@ -171,3 +171,8 @@ def test_output_base_chosen_on_main_window_is_remembered(qtbot, tmp_path):
 def test_output_base_label_when_unset(qtbot):
     w = MainWindow(fetch_on_start=False, open_folder_on_finish=False); qtbot.addWidget(w)
     assert "PDF のフォルダの隣" in w.output_base_label.text()
+
+
+def test_master_dialog_uses_material_type_wording(qtbot):
+    d = MasterDialog(load_master_file(Path("tests/fixtures/unit_weights.json"))); qtbot.addWidget(d)
+    assert d.table.horizontalHeaderItem(0).text() == "材種" and d.category_combo.itemText(0) == "すべての材種"
