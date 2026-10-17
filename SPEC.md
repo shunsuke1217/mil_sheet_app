@@ -126,7 +126,7 @@ class PageResult(BaseModel):
 - 照合のしかた:
   - 全角・半角、大文字・小文字の違いは無視する（照合の前に NFKC で正規化し、大文字にそろえる）
   - **英字のキーワードは、単語として独立しているときだけ当たる**（例: `CT` は `CONTRACT` には当たらない。`PL` は `PLATE` には当たらない）。
-    ハイフンやスペース、記号は単語の区切りとみなす
+    ハイフンやスペース、記号、**数字**は単語の区切りとみなす（例: `BCR295` は `BCR` に、`STK400` は `STK` に当たる。`STKR` は `STK` に当たらない）
   - 日本語のキーワードは、表記の一部に含まれていれば当たる（例: `アングル` は `等アングル` に当たる）
 
 | 優先度 | 品名欄に含まれるキーワード（原表記） | 品名 |
@@ -322,7 +322,7 @@ xlsx の行を次の順に並べ、PDF のページもその順に並べ替え�
 3. 単重がマスタに未登録
 4. AI が `uncertain=true` を返した
 5. 丸数字の本数が、印字された本数を超えている
-6. 押印の N と、そのページの丸数字の合計が一致しない（丸数字が `あり` の行が 1 つ以上あるページだけで比べる）
+6. 押印の N と、そのページの丸数字の合計が一致しない（丸数字が `あり` の行が 1 つ以上あるページだけで比べる。押印の N が読めない（null）ページは比べずに飛ばし、要確認にもしない）
 7. 計算した重量と、証明書の質量の按分（`mass_kg / printed_qty × 本数`）が 5% 以上ずれている（寸法・長さの読み違いを見つけるため）
 8. 証明書ではないページ
 9. API エラー・読み取り失敗
@@ -370,6 +370,7 @@ API エラーのページは、ページ以外の項目がすべて null の 1 �
   - Mac: 署名なしだとブロックされる。社内利用なら右クリック →「開く」で起動する。
     警告なしで配るには Apple Developer Program への登録と、署名・公証が必要
 - Mac は Apple シリコン用だけでよい（Intel 用は必要になったら検討）
+- Windows は exe 1 つ（`--onefile`）。Mac は .app を zip にして配る（そのまま上げるとシンボリックリンクと実行権限が壊れるため）
 
 `.github/workflows/build.yml` の例:
 
@@ -391,11 +392,13 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt pyinstaller
-      - run: pyinstaller --noconfirm --windowed --name ミルシート読み取り --add-data "millsheet/unit_weights.json:millsheet" main.py
+      - run: pyinstaller --noconfirm --windowed ${{ runner.os == 'Windows' && '--onefile' || '' }} --name ミルシート読み取り --add-data "millsheet/unit_weights.json:millsheet" main.py
+      - if: runner.os == 'macOS'
+        run: ditto -c -k --keepParent "dist/ミルシート読み取り.app" dist/ミルシート読み取り-mac.zip
       - uses: actions/upload-artifact@v4
         with:
           name: ミルシート読み取り-${{ matrix.os }}
-          path: dist/
+          path: ${{ runner.os == 'Windows' && 'dist/ミルシート読み取り.exe' || 'dist/ミルシート読み取り-mac.zip' }}
 ```
 
 ## 12. 出力

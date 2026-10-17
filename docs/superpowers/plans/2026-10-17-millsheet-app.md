@@ -117,7 +117,7 @@ class Record:
     weight: int | None        # 重量
     reasons: list[str]        # 確認理由（空なら要確認=false）
     input_index: int          # 入力順（0 始まり。並べ替えの最後のキー）
-    kind: Literal["line", "not_certificate", "error"] = "line"
+    kind: Literal["line", "no_lines", "not_certificate", "error"] = "line"   # no_lines: 証明書だが行が 1 つも返らなかった
     page_label: str | None = None  # "Ｐ-3"。ordering が入れる。ページ番号が無ければ None
     def needs_review(self) -> bool: ...   # bool(reasons)
     def to_dict(self) -> dict: ...        # SPEC 12.1 のキーと順。ページ欄は page_label or "—"
@@ -126,11 +126,12 @@ class Record:
 ## テストの共通部品
 
 `tests/conftest.py` のフィクスチャは、使い始めるタスクで足していく:
-`data_dir`（`MILLSHEET_DATA_DIR` を tmp に向け、そのパスを返す。Task 1）、`sample_pdf`（`tests/fixtures/20261014084620.pdf`。無ければ skip。Task 1）、
+`data_dir`（**autouse**。全テストで `MILLSHEET_DATA_DIR` を tmp に向け、そのパスを返す。開発 PC の本物のキャッシュ・設定を汚さないため。Task 1）、`memory_keyring`（**autouse**。`keyring.set_keyring()` でメモリ上のバックエンドに差し替え、本物のキーチェーンを呼ばない。Task 1）、`sample_pdf`（`tests/fixtures/20261014084620.pdf`。無ければ skip。Task 1）、
 `sample_pages`（`read_raw("tests/fixtures/sample_raw.json")` の pages。Task 5。`rawfile` は Task 7 なので、Task 5 では conftest 内で同じ形を直接読む小さな関数を使い、Task 7 で `read_raw` に置き換える）、
-`fixture_master`（`load_master_file("tests/fixtures/unit_weights.json")`。Task 5）、`sample_records`（Task 6）、`ordered_sample_dicts`（Task 7）、
+`fixture_master`（`load_master_file("tests/fixtures/unit_weights.json")`。Task 5）、`sample_records`（Task 6）、`ordered_sample_dicts`（`order_records(sample_records)` で**例外サンプルも含めて全部を 1 回で並べた**ものの `to_dict()`。Task 7）、
 `sample_folder` / `fake_reader` / `fixture_master_loader`（Task 9）。
-`tests/helpers.py` の `rec()`・`line()`・`page_with()`・`make_pdf(path, n)`（各ページに `"{ファイル名の stem}-{n}"` を書いた PDF）・`FakeReader`（`calls` を数え、決まった `PageResult` を返す）は、最初に使うタスクで作る。
+`tests/helpers.py` の `rec()`・`line()`・`page_with()`・`make_pdf(path, n)`（各ページに `"{ファイル名の stem}-{n}"` を書いた PDF）・`FakeReader`（`calls` を数え、`results: dict[str, PageResult]`（PNG の SHA-256 → 結果）があればそれを、無ければ既定の `PageResult` を返す。`raise_error` を渡すと毎回それを投げる）・`sample_record()`（= `rec()` の既定）・`client_returning(status, json)` / `client_raising(exc)`（`httpx.MockTransport` を使った `httpx.Client`）・定数 `URL`（`https://docs.google.com/spreadsheets/d/TESTID/edit`）と `VALUES`（見出し＋`tests/fixtures/unit_weights.json` の全行）は、すべて `tests/helpers.py` に置き、最初に使うタスクで作る。`line()` の既定値は `Line` の全フィールドを埋める（`circle_status="あり"` など）。
+`two_pdfs`（`make_pdf(tmp/"A.pdf", 2)`・`make_pdf(tmp/"sub/B.pdf", 1)`。Task 7）も conftest に置く。
 
 ---
 
@@ -156,6 +157,7 @@ uv venv --python 3.12 .venv
 ```
 `requirements.txt`: `PySide6`, `pymupdf`, `google-genai`, `pydantic>=2`, `openpyxl`, `httpx`, `platformdirs`, `keyring`（バージョンはインストールした時点のものを `==` で固定）。`requirements-dev.txt`: `-r requirements.txt`, `pytest`, `pytest-qt`。
 `uv pip install -r requirements-dev.txt` が通ること。
+`pytest.ini`: `[pytest]` に `pythonpath = .` と `testpaths = tests`。
 `.gitignore`: `.venv/`, `__pycache__/`, `dist/`, `build/`, `*.spec`, `/20261014084620.pdf`, `/ミルシート他表紙類2025.xlsx`, `/sample_raw.json`, `/unit_weights.json`, `*.key.json`, `.env`。
 `tests/fixtures/20261014084620.pdf` も社外秘なので `.gitignore` に入れ、PDF を使うテストはファイルが無ければ `pytest.skip` する（`conftest.py` に `sample_pdf` フィクスチャを置く）。
 
@@ -218,7 +220,7 @@ def test_mask_hides_secrets():
   - `classify.CATEGORIES: list[str]` — 6.4 の表の 17 種類（優先度順）
   - `classify.classify(commodity_raw: str | None, size_raw: str | None) -> str | None`
 
-照合のしかた（6.4 のとおり）: NFKC → 大文字 → 英字キーワードは「前後が英数字でない」ときだけ一致（正規表現 `(?<![A-Z0-9])KEYWORD(?![A-Z0-9])`。キーワード中のハイフン・空白はそのまま比べる）、日本語キーワードは部分一致。優先度の小さい順に調べ、最初に当たったもの。当たらなければ `size_raw` を NFKC・strip・大文字にして先頭が `L` ならアングル、それ以外は None。キーワード表は 6.4 の表をそのまま定数にする。
+照合のしかた（6.4 のとおり）: NFKC → 大文字 → 英字キーワードは「前後が英字でない」ときだけ一致（正規表現 `(?<![A-Z])KEYWORD(?![A-Z])`。数字は区切りとみなすので `BCR295` は `BCR` に、`STK400` は `STK` に当たる。キーワード中のハイフン・空白はそのまま比べる）、日本語キーワードは部分一致。優先度の小さい順に調べ、最初に当たったもの。当たらなければ `size_raw` を NFKC・strip・大文字にして先頭が `L` ならアングル、それ以外は None。キーワード表は 6.4 の表をそのまま定数にする。
 
 - [ ] **Step 1: 失敗するテストを書く**
 
@@ -240,6 +242,9 @@ def test_mask_hides_secrets():
     ("H-BEAM / 別表", None, "H形鋼"),
     ("一般構造用形鋼", "65X65X6", None),              # L で始まらなければ未分類
     (None, " l65x65x6", "アングル"),                  # 補助ルールも NFKC・strip・大文字
+    ("BCR295", None, "コラム"),                       # 数字は区切り
+    ("STK400", None, "丸パイプ"),
+    ("STKR400", None, "STKR"),                        # STK は STKR に当たらない（R は英字）
     (None, None, None),
 ])
 def test_classify(raw, size, expected):
@@ -328,7 +333,7 @@ def test_parse_length_mm(raw, mm):
   - `master.load_master_file(path: Path) -> Master`（`[{"品名","サイズ","単重"}]` の JSON を読む。`source="file"`。テストと pipeline のテスト用）
   - `master.export_bundled_csv(path: Path) -> None`（内蔵マスタを UTF-8 BOM 付き CSV、見出し `品名,サイズ,単重`）
 
-取得は `GET https://sheets.googleapis.com/v4/spreadsheets/{ID}/values/{range}?key={key}`。`range` は `sheet_name` があれば `'{sheet_name}'!A:Z`（URL エンコード）、無ければ `A:Z`。タイムアウト 15 秒。
+取得は `GET https://sheets.googleapis.com/v4/spreadsheets/{ID}/values/{range}?key={key}`。`range` は `sheet_name` があれば `'{sheet_name}'!A:Z`（URL エンコード）、無ければ `A:Z`。シート名の `'` は `''` にし、URL エンコードは `quote(range, safe="")`。クエリに `valueRenderOption=UNFORMATTED_VALUE` を付ける（単重が数値のまま返る）。返る行は末尾の空セルが省かれて短いことがあるので、足りない列は空として扱う。タイムアウト 15 秒。
 エラーの文言（`MasterFetchError` とキャッシュ時の警告の「原因」）:
 - 通信できない → `"ネットに接続できません"`
 - 400 で本文に `API key not valid` → `"Google の API キーが正しくありません"`
@@ -418,10 +423,10 @@ def test_export_bundled_csv_has_bom(tmp_path):
 各ページの扱い:
 - `result is None`（API エラー・PDF が開けない）→ `kind="error"` の 1 行。ページ以外は全部 None、理由は `R_ERROR.format(error)`
 - `is_certificate=false` → `kind="not_certificate"` の 1 行、理由 `R_NOT_CERT`
-- 証明書で `lines` が空 → 全項目 None の 1 行、理由 `R_NO_LINES`
+- 証明書で `lines` が空 → `kind="no_lines"` の 1 行。全項目 None、理由 `R_NO_LINES` だけ
 - それ以外 → `lines` の 1 行ごとに 1 レコード。`input_index` は全ページを通した連番（ページの順は `pages` の並び。呼ぶ側がファイル名順・ページ順にして渡す）
 
-1 行の計算: 品名 `classify(commodity_raw, size_raw)` → 寸法 `normalize_size` → マスタに一致したらマスタのサイズ文字列に置き換え → 長さ（PL は None）→ 本数は `circled_qty` → 単重（PL は None、PL 以外は `master.lookup`）→ 重量（8.5。`Decimal(str(x))` で計算して `ROUND_HALF_UP`）。PL の重量は `mass_kg`、本数と印字本数がどちらもあって違うときは `mass_kg / printed_qty × 本数`。
+1 行の計算: 品名 `classify(commodity_raw, size_raw)` → 寸法 `normalize_size` → マスタに一致したらマスタのサイズ文字列に置き換え → 長さ（PL は None）→ 本数は `circled_qty` → 単重（PL は None、PL 以外は `master.lookup`）→ 重量（8.5。`Decimal(str(x))` で計算して `ROUND_HALF_UP`）。PL の重量は、本数が None なら None（必須項目のチェックで要確認になる）、本数が印字本数より**少ない**ときは `mass_kg / printed_qty × 本数`、それ以外は `mass_kg`（8.5）。
 
 確認理由（9章の番号順に、当てはまるものをすべて。文言は固定）:
 
@@ -471,7 +476,7 @@ def test_exception_sample_rows_are_kept_and_flagged(sample_pages, fixture_master
     assert recs[2].kind == "error" and recs[2].reasons == [R_ERROR.format("APIタイムアウト")]
 
 def test_unreadable_circle_reason_differs_from_no_circle(fixture_master):
-    recs = build_records([page_with(line(circle_status="読めない", uncertain=True))], fixture_master)
+    recs = build_records([page_with(line(circle_status="読めない", circled_qty=None, uncertain=True))], fixture_master)
     assert R_UNREADABLE in recs[0].reasons and R_NO_CIRCLE not in recs[0].reasons
 
 def test_unregistered_size(fixture_master):
@@ -497,10 +502,15 @@ def test_not_certificate_page(fixture_master):
 
 def test_certificate_with_no_lines_yields_review_row(fixture_master):
     r = build_records([PageEntry("x.pdf", 1, PageResult(is_certificate=True, stamp_valid_qty=None, lines=[]))], fixture_master)
-    assert len(r) == 1 and r[0].reasons == [R_NO_LINES]
+    assert len(r) == 1 and r[0].kind == "no_lines" and r[0].reasons == [R_NO_LINES]
+
+def test_pl_without_circle_has_no_weight(fixture_master):
+    r = build_records([page_with(line(commodity_raw="PLATE", size_raw="9X1524X3048", length_raw=None,
+                                      circle_status="なし", circled_qty=None, printed_qty=2, mass_kg=657))], fixture_master)[0]
+    assert r.weight is None and R_NO_CIRCLE in r.reasons
 
 def test_to_dict_keys():
-    assert list(sample_record().to_dict()) == ["ページ", "ファイル", "ページ番号", "品名", "材質", "寸法",
+    assert list(rec().to_dict()) == ["ページ", "ファイル", "ページ番号", "品名", "材質", "寸法",
                                                 "長さ_mm", "本数", "ミルシート重量", "重量", "要確認", "確認理由"]
 ```
 `page_with(...)` / `line(...)` は既定値付きでテスト用の `PageEntry` / `Line` を作るヘルパー（テストファイル内。既定は H形鋼 200X200X8X12、11.5M、丸数字 1、印字 18、質量 10332）。
@@ -521,12 +531,12 @@ def test_to_dict_keys():
 **Interfaces:**
 - Consumes: `normalize.Record`、`sizes.size_key`
 - Produces:
-  - `ordering.CATEGORY_ORDER: list[str]` — 8.6 (1) の 1〜17 の順（`H形鋼, I形鋼, コラム, STKR, PL, FB, 溝形鋼, Cチャン, 丸パイプ, アングル, T形鋼, チェッカープレート, 角鋼, 丸鋼, D（鉄筋）, デッキ, EXメタ`）
+  - `ordering.CATEGORY_ORDER: list[str]` — **出力の並び順の唯一の定義**（`classify.CATEGORIES` は判定の優先度で、別の意味。並び順には使わない）。8.6 (1) の 1〜17 の順（`H形鋼, I形鋼, コラム, STKR, PL, FB, 溝形鋼, Cチャン, 丸パイプ, アングル, T形鋼, チェッカープレート, 角鋼, 丸鋼, D（鉄筋）, デッキ, EXメタ`）
   - `ordering.PageRef = tuple[str, int]`（相対パス, 1 始まりのページ番号）
   - `ordering.order_records(records: list[Record]) -> tuple[list[Record], list[PageRef]]` — 並べた新しいリストと、まとめた PDF のページの順を返す。各 Record の `page_label` を `"Ｐ-{n}"` に設定する（`page_no is None` の行は None のまま、`PageRef` にも入れない）
 
 並べ替えのキー（この順に比べる）:
-1. 品名の順位: `CATEGORY_ORDER` の位置、品名 None の `line` は 17、`not_certificate` / `error` は 18
+1. 品名の順位: `CATEGORY_ORDER` の位置、品名 None の `line` と `no_lines` は 17、`not_certificate` / `error` は 18
 2. 寸法が None なら後ろ
 3. 寸法の数値の組を大きい順（`size_key(size)[1]` の各数値を符号反転したタプルで昇順）
 4. 長さが None なら後ろ、長さの長い順
@@ -592,7 +602,7 @@ def test_sample_keeps_original_order(sample_records):   # conftest: build_record
   - `merge_pdf.merge_pages(pages: list[PageRef], source_dir: Path, out_path: Path) -> None`（PyMuPDF の `insert_pdf(src, from_page=n-1, to_page=n-1)`。開けないファイルがあれば何も書かずに `MergeError(missing: list[str])`）
   - `merge_pdf.MergeError(Exception)`
 
-xlsx（12.2）: シート名「ミルシート」、列 `ページ / 品名 / 材質 / 寸法 / 長さ(mm) / 本数 / ミルシート重量(kg/m) / 重量(kg) / 要確認 / 確認理由`。要確認は `"要確認"` か空、確認理由は `"、"` でつなぐ。要確認の行は薄い黄色 `FFF9C4`、null のセルは薄い赤 `FFCDD2`（要確認・確認理由の列と、PL の長さ・ミルシート重量の列は null でも塗らない）。最終行の下の行に「合計」と `=SUM(H2:H{last})`。`freeze_panes="A2"`、オートフィルタは見出しからデータの最終行まで。長さ・重量は `#,##0`。保存は一時ファイルに書いてから `os.replace`、`PermissionError` は `OutputLockedError(path)` にして投げる（`export/base.py` に定義）。
+xlsx（12.2）: シート名「ミルシート」、列 `ページ / 品名 / 材質 / 寸法 / 長さ(mm) / 本数 / ミルシート重量(kg/m) / 重量(kg) / 要確認 / 確認理由`。要確認は `"要確認"` か空、確認理由は `"、"` でつなぐ。要確認の行は薄い黄色 `FFF9C4`、null のセルは薄い赤 `FFCDD2`（要確認・確認理由の列と、PL の長さ・ミルシート重量の列は null でも塗らない）。最終行の下の行に「合計」と `=SUM(H2:H{last})`。`freeze_panes="A2"`、オートフィルタは見出しからデータの最終行まで。長さ・重量は `#,##0`。保存は一時ファイルに書いてから `os.replace`、`PermissionError` は `OutputLockedError(path)` にして投げる（`export/base.py` に定義）。JSON（`write_json`）と PDF（`merge_pages`）の保存も同じく一時ファイル → `os.replace` で、`PermissionError` は `OutputLockedError`。
 
 - [ ] **Step 1: 失敗するテストを書く**
 
@@ -601,17 +611,18 @@ def test_xlsx_layout(tmp_path, ordered_sample_dicts):   # conftest: 並べ替え
     p = LocalXlsxExporter(tmp_path / "out.xlsx").export(ordered_sample_dicts, {})
     ws = openpyxl.load_workbook(p)["ミルシート"]
     assert [c.value for c in ws[1]] == ["ページ", "品名", "材質", "寸法", "長さ(mm)", "本数", "ミルシート重量(kg/m)", "重量(kg)", "要確認", "確認理由"]
-    assert ws["A2"].value == "Ｐ-1" and ws["H2"].value == 574 and ws["H2"].number_format == "#,##0"
+    # 並べると例外サンプルの Ｈ-294×200×8×12（12000, 10000）が 2・3 行目、サンプル _1 が 4 行目に来る
+    assert ws["A2"].value == "Ｐ-1" and ws["A4"].value == "Ｐ-2" and ws["H4"].value == 574 and ws["H4"].number_format == "#,##0"
     last = 1 + len(ordered_sample_dicts)
     assert ws.cell(last + 1, 8).value == f"=SUM(H2:H{last})"
     assert ws.freeze_panes == "A2" and ws.auto_filter.ref == f"A1:J{last}"
 
 def test_xlsx_colors(tmp_path, ordered_sample_dicts):
     ws = openpyxl.load_workbook(LocalXlsxExporter(tmp_path / "o.xlsx").export(ordered_sample_dicts, {}))["ミルシート"]
-    review_row = next(r for r in range(2, ws.max_row) if ws.cell(r, 10).value == "丸数字が書かれていません")
+    review_row = next(r for r in range(2, ws.max_row) if (ws.cell(r, 10).value or "").startswith("丸数字が書かれていません"))
     assert ws.cell(review_row, 2).fill.fgColor.rgb.endswith("FFF9C4")    # 品名あり → 黄色
     assert ws.cell(review_row, 6).fill.fgColor.rgb.endswith("FFCDD2")    # 本数 null → 赤
-    ok_row = 2
+    ok_row = 4                                                             # Ｈ-200×200×8×12（要確認なし）
     assert ws.cell(ok_row, 2).fill.fgColor.rgb in (None, "00000000")      # 要確認でない行は塗らない
     pl_row = next(r for r in range(2, ws.max_row) if ws.cell(r, 2).value == "PL")
     assert ws.cell(pl_row, 5).value is None and not ws.cell(pl_row, 5).fill.fgColor.rgb.endswith("FFCDD2")
@@ -665,7 +676,7 @@ def test_merge_pages_missing_file(tmp_path, two_pdfs):
   - `extract.render_png(pdf: Path, page_no: int, dpi: int = 200) -> bytes`
   - `extract.PageReader`（Protocol: `read(png: bytes) -> PageResult`）
   - `extract.GeminiReader(api_key: str)`（`PageReader` を実装）
-  - `extract.read_folder(folder: Path, reader: PageReader, cache: PageCache, *, workers: int = 4, on_progress: Callable[[str, int, int], None] = ..., cancel: threading.Event | None = None) -> list[PageEntry]` — 戻り値はファイル名順・ページ順。`on_progress(相対パス, 何ページ目, そのファイルのページ数)` は読み取りを始めるたびに呼ぶ。キャンセルされたら `Cancelled` を投げる（終わったページはキャッシュに残る）
+  - `extract.read_folder(folder: Path, reader: PageReader, cache: PageCache, *, workers: int = 4, on_progress: Callable[[str, int, int, int, int], None] = ..., cancel: threading.Event | None = None) -> list[PageEntry]` — 戻り値はファイル名順・ページ順。`on_progress(相対パス, 何ページ目, そのファイルのページ数, 全体の何ページ目, 全ページ数)` はページが終わるたびに呼ぶ（最初に全 PDF のページ数を数える）。キャンセルされたら `Cancelled` を投げる（終わったページはキャッシュに残る）
   - `extract.Cancelled(Exception)`、`extract.PdfOpenError(Exception)`、`extract.PageReadError(Exception)`（1 ページの読み取りがリトライ後も失敗）、`extract.ReaderAuthError(Exception)`（キーの誤り・課金未設定。全体を止める）
   - `cache.PageCache(dir: Path)`: `get(pdf_hash: str, page_no: int) -> PageResult | None`、`put(pdf_hash, page_no, result) -> None`、`cache.file_hash(path: Path) -> str`（SHA-256）。キーは `f"{pdf_hash}_{page_no}_{MODEL}_{PROMPT_VERSION}"`、成功した結果だけ保存する
 
@@ -683,10 +694,12 @@ interaction = client.interactions.create(
 )
 return PageResult.model_validate_json(interaction.output_text)
 ```
-リトライは `GeminiReader.read` の中で行う: 例外（通信・5xx・429・JSON の検証エラー）のとき 1, 2, 4 秒待って最大 3 回やり直し、4 回目も失敗したら `PageReadError(メッセージ)` を投げる（メッセージの API キーは `applog.mask` で伏せる）。`read_folder` は `PageReadError` を受けて `PageEntry.error` にする。401/403（キーの誤り・課金未設定）はリトライせず、全体を止めて `ReaderAuthError("Gemini の API キーが正しくないか、課金が設定されていません")` を投げる。
-`read_folder`: PDF が開けなければ `PageEntry(file, None, None, "PDF を開けませんでした")` を 1 つ入れて次のファイルへ。ページごとに キャッシュ → 無ければ `render_png` → `reader.read` を `ThreadPoolExecutor(max_workers=workers)` で回す。
+リトライは `GeminiReader.read` の中で行う: 例外（通信・5xx・429・JSON の検証エラー）のとき 1, 2, 4 秒待って最大 3 回やり直し、4 回目も失敗したら `PageReadError(メッセージ)` を投げる（メッセージの API キーは `applog.mask` で伏せる）。`read_folder` は `PageReadError` を受けて `PageEntry.error` にする。キーの誤り（**400 で本文に `API_KEY_INVALID` / `API key not valid`**、または 401/403）はリトライせず、全体を止めて `ReaderAuthError("Gemini の API キーが正しくありません")` を投げる（課金未設定はコードでは見分けられないので README で注意する）。
+`read_folder`: PDF が開けなければ `PageEntry(file, None, None, "PDF を開けませんでした")`、`doc.needs_pass` なら `PageEntry(file, None, None, "PDF にパスワードが掛かっているため開けませんでした")` を 1 つ入れて次のファイルへ。ログ（13章）にページごとに `"{相対パス} {n}ページ目: キャッシュ / 読み取り成功 / 失敗（理由）"` を書く。ページごとに キャッシュ → 無ければ `render_png` → `reader.read` を `ThreadPoolExecutor(max_workers=workers)` で回す。
 
-- [ ] **Step 1: 失敗するテストを書く**（`FakeReader` は呼ばれた回数を数え、決まった `PageResult` を返すか、指定回数だけ例外を投げる）
+- [ ] **Step 0: SDK の書き方を確かめる** — `google-genai` の版を `requirements.txt` で固定し、`GEMINI_API_KEY` を入れて小さなスクリプト（scratch に置く）で 1 回だけ下の呼び出しを試す。確かめること: `interactions.create` の引数名、結果のテキストの取り方（`output_text` か `outputs[-1].text` か）、`PageResult.model_json_schema()` の `$defs` / `$ref` と `anyOf: [..., null]` が受け付けられるか。受け付けられなければ `$ref` を展開する関数 `inline_refs(schema: dict) -> dict` を `extract.py` に足す。分かった書き方で下の説明を読み替える
+
+- [ ] **Step 1: 失敗するテストを書く**
 
 ```python
 def test_list_pdfs_same_name_in_subfolders(tmp_path):
@@ -751,13 +764,13 @@ def test_gemini_reader_retries_then_reports_error(monkeypatch):
 - Produces:
   - `pipeline.Outputs`（dataclass: `xlsx: Path`, `json: Path`, `raw: Path`, `pdf: Path | None`）、`pipeline.outputs_for(xlsx: Path) -> Outputs`（`X.xlsx` → `X.json` / `X_raw.json` / `X.pdf`）
   - `pipeline.RunResult`（dataclass: `records: list[Record]`, `outputs: Outputs`, `master: Master`, `warnings: list[str]`, `errors: list[str]`）。`errors` は出力の一部ができなかった理由（xlsx が開かれている、PDF が作れない）
-  - `pipeline.run(source_dir: Path, xlsx: Path, *, settings: Settings, gemini_key: str, google_key: str, reader: PageReader | None = None, master_loader: Callable[[], tuple[Master, list[str]]] | None = None, on_progress=..., cancel=None) -> RunResult`
+  - `pipeline.run(source_dir: Path, xlsx: Path, *, settings: Settings, gemini_key: str, google_key: str, reader: PageReader | None = None, workers: int = 4, master_loader: Callable[[], tuple[Master, list[str]]] | None = None, on_progress=..., cancel=None) -> RunResult`
   - `pipeline.rebuild(raw: Path, xlsx: Path, *, settings: Settings, google_key: str, master_loader=None) -> RunResult`
-  - `pipeline.review_messages(records: list[Record]) -> list[str]`（画面の要確認一覧の文言。13章の例 `"○○.pdf の 3 ページ目がうまく読み込めませんでした（丸数字が読めません）"`。ページ番号が無いときは `"○○.pdf を読み込めませんでした（…）"`）
+  - `pipeline.review_messages(records: list[Record]) -> list[str]`（画面の要確認一覧の文言。13章の例 `"○○.pdf の 3 ページ目がうまく読み込めませんでした（丸数字が読めません）"`。理由が複数なら「、」でつなぐ。ページ番号が無いときは `"○○.pdf を読み込めませんでした（…）"`。単重未登録の行は末尾に `"　登録が必要: {品名} {寸法}"` を付ける（7.4）。`○○.pdf` は相対パス、何ページ目は元の PDF のページ番号）
 
 `run` の順番: キーの有無を確かめる（無ければ `ValueError("設定画面で Gemini の API キーを入力してください")` など）→ **マスタを先に取得**（失敗したら課金前に止める）→ `read_folder` → `_raw.json` を保存 → `_build_and_export`。
 `rebuild` は `_raw.json` を読み、マスタを取り直して `_build_and_export`。`source_dir` が None か、元の PDF が無ければ PDF は作らず `errors` に `"元の PDF が見つからないため、PDF は作れませんでした"`。
-`_build_and_export`: `build_records` → `order_records` → JSON・xlsx（`get_exporter(settings.exporter, xlsx)`）・PDF。meta は `{"作成日時", "モデル": MODEL, "単重マスタ": master.meta()}`。`OutputLockedError` は `errors` に `"xlsx が他のアプリで開かれています。閉じてから『作り直す』を押してください"` を入れて続ける（raw は保存済み）。`master_loader` を省略したら `fetch_master(settings.sheet_url, settings.sheet_name, google_key)` を使う。
+`_build_and_export`: `build_records` → `order_records` → JSON・xlsx（`get_exporter(settings.exporter, xlsx)`）・PDF。meta は `{"作成日時", "モデル": MODEL, "単重マスタ": master.meta()}`。`OutputLockedError` は `errors` に `"{ファイル名} が他のアプリで開かれています。閉じてから『作り直す』を押してください"` を入れて残りの出力を続ける（raw は保存済み）。開始・終了・出力先・警告・エラーをログに書く。`master_loader` を省略したら `fetch_master(settings.sheet_url, settings.sheet_name, google_key)` を使う。
 
 - [ ] **Step 1: 失敗するテストを書く**（`reader` は raw フィクスチャの結果を返す偽物、`master_loader` は `load_master_file` を返す）
 
@@ -799,7 +812,23 @@ def test_review_messages():
     assert review_messages([rec(file="a.pdf", page=3, reasons=["丸数字が読めません"])]) == \
         ["a.pdf の 3 ページ目がうまく読み込めませんでした（丸数字が読めません）"]
 ```
-`sample_folder` は `tests/fixtures/20261014084620.pdf` だけを tmp のフォルダにコピーしたもの（PDF が無ければ skip）。
+`sample_folder` は `tests/fixtures/20261014084620.pdf` だけを tmp のフォルダにコピーしたもの（PDF が無ければ skip）。`fake_reader` は、サンプル PDF の各ページを `render_png` した PNG の SHA-256 → `sample_raw.json` の結果、の対応表を持つ `FakeReader`（並列で呼ばれてもページとずれない）。`run` は `workers` を受け取って `read_folder` に渡す（既定 4）。
+
+追加のテスト（18章の最後の基準。サンプル PDF が無くても動く）:
+
+```python
+def test_merged_pdf_page_n_is_source_of_label_n(tmp_path):
+    make_pdf(tmp_path / "src/a.pdf", 1); make_pdf(tmp_path / "src/b.pdf", 1)
+    # a.pdf p1 = 溝形鋼、b.pdf p1 = H形鋼 → 並べると b が Ｐ-1
+    reader = FakeReader(results={png_hash(tmp_path / "src/a.pdf", 1): page_result(commodity_raw="溝形鋼", size_raw="150X75X6.5"),
+                                 png_hash(tmp_path / "src/b.pdf", 1): page_result(commodity_raw="H形鋼", size_raw="200X200X8X12")})
+    res = run(tmp_path / "src", tmp_path / "o.xlsx", settings=Settings(), gemini_key="g", google_key="k",
+              reader=reader, master_loader=fixture_master_loader_fn)
+    doc = pymupdf.open(res.outputs.pdf)
+    labels = {r.page_label: r.file for r in res.records}
+    assert doc[0].get_text().strip() == "b-1" and labels["Ｐ-1"] == "b.pdf"
+```
+`png_hash(pdf, n)` と `page_result(**line_kwargs)`（1 行だけの `PageResult`）も `tests/helpers.py` に置く。`fixture_master_loader_fn` は `fixture_master_loader` フィクスチャの中身と同じ関数。
 
 - [ ] **Step 2: 実行して失敗を確かめる** — FAIL
 - [ ] **Step 3: 実装する**
@@ -819,13 +848,13 @@ def test_review_messages():
 - Produces:
   - `gui.worker.RunWorker(QThread)`（`__init__(mode: Literal["run", "rebuild"], **pipeline_kwargs)`。シグナル `progress(str, int, int)`（文言, 全体の何ページ目, 全ページ数）, `finished_ok(object)`（RunResult）, `failed(str)`。`cancel()` で `threading.Event` を立てる）
   - `gui.main_window.MainWindow(QMainWindow)`（`__init__(fetch_on_start: bool = True)`、属性 `run_button`、メソッド `set_source_dir(p: Path)`・`set_output_path(p: Path)`）
-  - `gui.settings_dialog.SettingsDialog(QDialog)`（属性 `gemini_key_edit`・`google_key_edit`・`sheet_url_edit`・`sheet_name_edit`）
+  - `gui.settings_dialog.SettingsDialog(QDialog)`（属性 `gemini_key_edit`・`google_key_edit`・`sheet_url_edit`・`sheet_name_edit`・`output_path_edit`）
   - `gui.master_dialog.MasterDialog(QDialog)`（`__init__(master: Master)`、属性 `search_edit`・`category_combo`、メソッド `visible_row_count() -> int`）
   - `main.py`: `applog.setup_logging()` → `QApplication` → `MainWindow().show()`
 
 画面の中身（13章）:
 - メイン: フォルダのドロップ枠（`dragEnterEvent` でフォルダだけ受け付ける）＋「フォルダを選ぶ」、出力先の xlsx（「参照」）、実行・キャンセル、進捗バーと `"{ファイル名} {n}/{全} ページ目を読み取り中"`、要確認の一覧（`QListWidget`。`review_messages` の文言。単重未登録の行は品名・サイズを選択してコピーできる）、「スプレッドシートを開く」「マスタを読み直して作り直す」「xlsx を開く」「PDF を開く」「フォルダを開く」（`QDesktopServices.openUrl`）、警告と `errors` の表示、マスタの件数・取得日時・取得元（起動時に別スレッドで `fetch_master`）
-- 設定: Gemini の API キー、Google の API キー（どちらも `QLineEdit.EchoMode.Password`、空欄のまま保存したら変更しない）、スプレッドシートの URL、シート名、「接続を確かめる」（`fetch_master` の件数か失敗の文言）、「初期マスタを CSV で書き出す」
+- 設定: Gemini の API キー、Google の API キー（どちらも `QLineEdit.EchoMode.Password`、空欄のまま保存したら変更しない）、スプレッドシートの URL、シート名、出力先（既定の出力フォルダ。`Settings.output_path`）、「接続を確かめる」（`fetch_master` の件数か失敗の文言）、「初期マスタを CSV で書き出す」
 - マスタ一覧: `QTableWidget`（品名・サイズ・単重）、検索欄（サイズの部分一致）、品名の絞り込み（`QComboBox`）、「スプレッドシートを開く」「読み直す」。編集はできない
 - 例外は画面に日本語で出し、詳しい内容はログに書く。API キーは画面にもログにも出さない
 
@@ -841,13 +870,12 @@ def test_main_window_enables_run(qtbot, data_dir, tmp_path):
     w.set_source_dir(tmp_path); w.set_output_path(tmp_path / "o.xlsx")
     assert w.run_button.isEnabled()
 
-def test_settings_dialog_saves_without_writing_keys_to_file(qtbot, data_dir, monkeypatch):
-    saved = {}
-    monkeypatch.setattr("millsheet.settings.set_secret", lambda n, v: saved.__setitem__(n, v))
+def test_settings_dialog_saves_without_writing_keys_to_file(qtbot, data_dir):   # memory_keyring は autouse
     d = SettingsDialog(); qtbot.addWidget(d)
-    d.gemini_key_edit.setText("G"); d.sheet_url_edit.setText("https://docs.google.com/spreadsheets/d/x/edit")
+    d.gemini_key_edit.setText("GKEY123"); d.sheet_url_edit.setText("https://docs.google.com/spreadsheets/d/x/edit")
     d.accept()
-    assert saved["gemini_api_key"] == "G" and "G" not in (data_dir / "settings.json").read_text("utf-8")
+    assert get_secret("gemini_api_key") == "GKEY123"
+    assert "GKEY123" not in (data_dir / "settings.json").read_text("utf-8")
 
 def test_master_dialog_filters(qtbot):
     d = MasterDialog(load_master_file(Path("tests/fixtures/unit_weights.json"))); qtbot.addWidget(d)
@@ -872,7 +900,9 @@ def test_master_dialog_filters(qtbot):
 - Consumes: `main.py`、`millsheet/unit_weights.json`
 
 - [ ] **Step 1: ワークフローを書く** — SPEC 11章の例をもとに、`pip install -r requirements.txt pyinstaller` と
-  `pyinstaller --noconfirm --windowed --name ミルシート読み取り --add-data "millsheet/unit_weights.json:millsheet" main.py`（PyInstaller 6 以降は Windows でも `:` 区切りでよい）。テストも先に流す（`pip install -r requirements-dev.txt` → `pytest -q`。PDF が無いテストは skip される）。Mac は `macos-latest`（Apple シリコン）
+  `pyinstaller --noconfirm --windowed --name ミルシート読み取り --add-data "millsheet/unit_weights.json:millsheet" main.py`（PyInstaller 6 以降は Windows でも `:` 区切りでよい）。
+  **Windows だけ `--onefile` を足す**（10章の「exe 1 つをどこに置いてもよい」に合わせる。Mac は .app のままにする。onefile の .app は PyInstaller 6 で非推奨）。
+  Mac の成果物は `ditto -c -k --keepParent "dist/ミルシート読み取り.app" ミルシート読み取り-mac.zip` で zip にしてから `upload-artifact` に渡す（そのまま上げるとシンボリックリンクと実行権限が壊れる）。Windows は `dist/ミルシート読み取り.exe` を上げる。テストも先に流す（`pip install -r requirements-dev.txt` → `pytest -q`。PDF が無いテストは skip される）。Mac は `macos-latest`（Apple シリコン）
 - [ ] **Step 2: 手元で Mac 用をビルドして起動を確かめる** — 上の `pyinstaller` コマンドで `dist/ミルシート読み取り.app` ができ、起動して設定画面が開き、「初期マスタを CSV で書き出す」が 225 件の CSV を作る（内蔵マスタが読めている）
 - [ ] **Step 3: README を書く** — 使い始めの手順（初期マスタの CSV を書き出してスプレッドシートに読み込む → 共有を「リンクを知っている全員が閲覧可」にする → Google Cloud で API キーを作り Google Sheets API だけに制限する → 設定画面に URL・キー・Gemini のキーを入れる）、開発の手順（`uv venv --python 3.12` → `pytest`）、配布の手順（タグを push）、署名なしの起動方法（11章）
 - [ ] **Step 4: コミット** — `git commit -m "build: GitHub Actions と README"`

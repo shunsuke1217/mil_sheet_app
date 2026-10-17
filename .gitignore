@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+dist/
+build/
+*.spec
+.superpowers/
+/20261014084620.pdf
+/ミルシート他表紙類2025.xlsx
+/sample_raw.json
+/unit_weights.json
+tests/fixtures/*.pdf
+*.key.json
+.env
