@@ -48,3 +48,27 @@ def sample_pdf():
     if not SAMPLE_PDF.exists():
         pytest.skip("サンプル PDF がありません（社外秘のためリポジトリに含めていない）")
     return SAMPLE_PDF
+
+
+def _load_raw_pages(path):
+    # Task 7 で rawfile.read_raw に置き換える
+    import json
+    from millsheet.schema import PageEntry, PageResult
+    data = json.loads(Path(path).read_text("utf-8"))
+    out = []
+    for file in sorted(data["pages"]):
+        for e in data["pages"][file]:
+            r = e["result"]
+            out.append(PageEntry(file, e["page"], PageResult.model_validate(r) if r else None, e.get("error")))
+    return out
+
+
+@pytest.fixture
+def sample_pages():
+    return _load_raw_pages(FIXTURES / "sample_raw.json")
+
+
+@pytest.fixture
+def fixture_master():
+    from millsheet.master import load_master_file
+    return load_master_file(FIXTURES / "unit_weights.json")
