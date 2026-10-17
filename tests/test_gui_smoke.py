@@ -1,4 +1,5 @@
 from pathlib import Path
+from unittest.mock import Mock
 
 from gui.main_window import MainWindow
 from gui.master_dialog import MasterDialog
@@ -80,3 +81,44 @@ def test_review_list_copy(qtbot):
     w.review_list.selectAll()
     w.copy_selected_reviews()
     assert QGuiApplication.clipboard().text() == "a.pdf の 1 ページ目\nb.pdf の 2 ページ目"
+
+
+# I3
+def test_refresh_master_twice_keeps_running_worker(qtbot, monkeypatch, data_dir):
+    import time as _t
+    from gui import worker as wmod
+    from millsheet.settings import Settings, save_settings, set_secret
+    save_settings(Settings(sheet_url="https://docs.google.com/spreadsheets/d/x/edit")); set_secret("google_api_key", "k")
+    monkeypatch.setattr(wmod.MasterWorker, "run", lambda self: _t.sleep(0.3))
+    w = MainWindow(fetch_on_start=False); qtbot.addWidget(w)
+    w.refresh_master(); first = w.master_worker
+    w.refresh_master()
+    assert first in w._master_workers or first is w.master_worker
+    qtbot.waitUntil(lambda: not first.isRunning(), timeout=3000)
+
+
+# I4
+def test_new_folder_updates_auto_output(qtbot, tmp_path):
+    w = MainWindow(fetch_on_start=False); qtbot.addWidget(w)
+    (tmp_path / "A").mkdir(); (tmp_path / "B").mkdir()
+    w.set_source_dir(tmp_path / "A"); w.set_source_dir(tmp_path / "B")
+    assert w.output_edit.text().endswith("B.xlsx")
+
+
+def test_user_chosen_output_is_kept(qtbot, tmp_path):
+    w = MainWindow(fetch_on_start=False); qtbot.addWidget(w)
+    (tmp_path / "A").mkdir(); (tmp_path / "B").mkdir()
+    w.set_source_dir(tmp_path / "A"); w.output_edit.setText(str(tmp_path / "mine.xlsx"))
+    w.set_source_dir(tmp_path / "B")
+    assert w.output_edit.text().endswith("mine.xlsx")
+
+
+def test_existing_output_asks_before_overwrite(qtbot, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+    (tmp_path / "A").mkdir(); (tmp_path / "A.xlsx").write_text("x")
+    w = MainWindow(fetch_on_start=False); qtbot.addWidget(w)
+    w.set_source_dir(tmp_path / "A")
+    asked = Mock(return_value=QMessageBox.StandardButton.No)
+    monkeypatch.setattr(QMessageBox, "question", asked)
+    w._start_run()
+    assert asked.called and w.worker is None

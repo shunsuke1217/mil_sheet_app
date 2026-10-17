@@ -1,6 +1,7 @@
 """ページ単位の読み取りキャッシュ（PDF のハッシュ＋ページ番号）。成功した結果だけ保存する。"""
 import hashlib
 import os
+import tempfile
 from pathlib import Path
 
 from millsheet.prompt import MODEL, PROMPT_VERSION
@@ -34,6 +35,8 @@ class PageCache:
 
     def put(self, pdf_hash: str, page_no: int, result: PageResult) -> None:
         p = self._path(pdf_hash, page_no)
-        tmp = p.with_suffix(".tmp")
-        tmp.write_text(result.model_dump_json(), "utf-8")
+        # 同じ内容の PDF を同時に読んでも衝突しないよう、一時ファイル名は一意にする
+        fd, tmp = tempfile.mkstemp(dir=self.dir, suffix=".tmp")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(result.model_dump_json())
         os.replace(tmp, p)

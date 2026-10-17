@@ -106,7 +106,8 @@ class PageResult(BaseModel):
 
 - モデル名はコードの定数で固定する（設定画面からは変えない）。**`gemini-3.8-flash`**（2026-10 時点の最新の安定版 Flash。2.5 系は新規プロジェクトでは利用が制限されている）
 - **Interactions API**（`client.interactions.create`）を使う。`response_format` に `PageResult` の JSON スキーマを指定し、
-  `generation_config` は `thinking_level="low"`・`seed=0`、`store=False`（Interactions API には temperature の指定が無いため、seed で結果を安定させる）
+  `generation_config` は `temperature=0`・`seed=0`・`thinking_level="low"`、`store=False`
+- キーの誤り（400 API key not valid・401・403）と、やり直しても直らない 4xx（モデル名の誤り・リクエストの形の誤りなど）はリトライせず、実行全体を止めて理由を表示する。リトライするのは 429・5xx・通信の失敗・JSON の形の誤り
 - 失敗したら最大 3 回リトライ（待ち時間を 1, 2, 4 秒と延ばす）
 - 3〜4 ページずつ並列に処理してよい（API の回数制限に注意）
 - **課金設定済みの API キーを使う**（無料枠は送ったデータが学習に使われる可能性がある）

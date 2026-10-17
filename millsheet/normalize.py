@@ -19,6 +19,7 @@ R_MASS_DIFF = "計算した重量（{}kg）が証明書の質量からの按分�
 R_NOT_CERT = "証明書ではないページです"
 R_ERROR = "読み取りに失敗しました（{}）"
 R_NO_LINES = "行が読み取れませんでした"
+R_PL_NO_PRINTED = "印字本数が読めないため、質量を按分できるか確かめられません"
 
 
 @dataclass
@@ -120,6 +121,8 @@ def _line_record(entry: PageEntry, ln: Line, master: Master, index: int, stamp_r
         reasons.append(R_OVER_QTY.format(qty, ln.printed_qty))
     if stamp_reason:
         reasons.append(stamp_reason)
+    if is_pl and qty is not None and not ln.printed_qty:
+        reasons.append(R_PL_NO_PRINTED)
     if not is_pl and weight is not None and ln.mass_kg and ln.printed_qty:
         prorated = _d(ln.mass_kg) / ln.printed_qty * qty
         if prorated > 0 and abs(Decimal(weight) - prorated) / prorated >= Decimal("0.05"):

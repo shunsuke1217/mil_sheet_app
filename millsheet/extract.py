@@ -37,6 +37,10 @@ class ReaderAuthError(Exception):
     pass
 
 
+class ReaderRequestError(Exception):
+    """やり直しても直らない 4xx（モデル名・リクエストの形の誤りなど）。実行全体を止める。"""
+
+
 class PageReader(Protocol):
     def read(self, png: bytes) -> PageResult: ...
 
@@ -92,12 +96,18 @@ def inline_refs(schema: dict) -> dict:
     return expand(schema)
 
 
+def _status(e: Exception) -> int | None:
+    # interactions の例外は status_code、従来の genai.errors は code を持つ
+    status = getattr(e, "status_code", None) or getattr(e, "code", None)
+    return status if isinstance(status, int) else None
+
+
 def _is_auth_error(e: Exception) -> bool:
-    code = getattr(e, "code", None)
-    text = f"{getattr(e, 'message', '')} {getattr(e, 'details', '')} {e}"
-    if code in (401, 403):
+    status = _status(e)
+    text = f"{getattr(e, 'message', '')} {getattr(e, 'details', '')} {getattr(e, 'body', '')} {e}"
+    if status in (401, 403):
         return True
-    return code == 400 and ("API_KEY_INVALID" in text or "API key not valid" in text)
+    return status == 400 and ("API_KEY_INVALID" in text or "API key not valid" in text)
 
 
 class GeminiReader:
@@ -128,7 +138,11 @@ class GeminiReader:
                 return self._call(png)
             except Exception as e:
                 if _is_auth_error(e):
-                    raise ReaderAuthError("Gemini の API キーが正しくありません") from None
+                    raise ReaderAuthError("Gemini の API キーが正しくないか、使う権限がありません") from None
+                status = _status(e)
+                if status and 400 <= status < 500 and status != 429:
+                    detail = mask(str(getattr(e, "message", None) or e), [self.api_key])[:300]
+                    raise ReaderRequestError(f"Gemini がリクエストを受け付けませんでした（HTTP {status}: {detail}）") from None
                 last = e
                 log.warning("Gemini の呼び出しに失敗（%d 回目）: %s", attempt + 1, mask(str(e), [self.api_key]))
                 if attempt < len(RETRY_WAITS):
@@ -150,7 +164,12 @@ def read_folder(folder: Path, reader: PageReader, cache: PageCache, *, workers: 
             log.warning("%s: %s", rel, e)
             failed[rel] = PageEntry(rel, None, None, str(e))
             continue
-        h = file_hash(folder / rel)
+        try:
+            h = file_hash(folder / rel)
+        except OSError as e:
+            log.warning("%s: 読み込めません: %s", rel, e)
+            failed[rel] = PageEntry(rel, None, None, "PDF を読み込めませんでした")
+            continue
         jobs += [(rel, p, n, h) for p in range(1, n + 1)]
     total = len(jobs)
     results: dict[tuple[str, int], PageEntry] = {}
@@ -166,11 +185,19 @@ def read_folder(folder: Path, reader: PageReader, cache: PageCache, *, workers: 
             entry, how = PageEntry(rel, page, cached), "キャッシュ"
         else:
             try:
-                result = reader.read(render_png(folder / rel, page))
-                cache.put(h, page, result)
-                entry, how = PageEntry(rel, page, result), "読み取り成功"
-            except PageReadError as e:
-                entry, how = PageEntry(rel, page, None, str(e)), f"失敗（{e}）"
+                png = render_png(folder / rel, page)
+            except Exception as e:  # 壊れたページ・読み取り中に消えたファイルなど
+                png, entry, how = None, PageEntry(rel, page, None, f"ページを画像にできませんでした（{e}）"), f"失敗（{e}）"
+            if png is not None:
+                try:
+                    result = reader.read(png)
+                    entry, how = PageEntry(rel, page, result), "読み取り成功"
+                    try:
+                        cache.put(h, page, result)
+                    except OSError as e:
+                        log.warning("キャッシュに保存できません: %s", e)
+                except PageReadError as e:
+                    entry, how = PageEntry(rel, page, None, str(e)), f"失敗（{e}）"
         log.info("%s %dページ目: %s", rel, page, how)
         with lock:
             results[(rel, page)] = entry

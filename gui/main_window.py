@@ -52,6 +52,8 @@ class MainWindow(QMainWindow):
         self.result: RunResult | None = None
         self.worker = None
         self.master_worker = None
+        self._master_workers: list = []   # 動いている間は参照を持ち続ける（途中で捨てると落ちる）
+        self._auto_output = ""            # 自動で入れた出力先（ユーザーが変えていなければフォルダに合わせて替える）
 
         self.drop = DropArea(self.set_source_dir)
         choose = QPushButton("フォルダを選ぶ…")
@@ -133,9 +135,10 @@ class MainWindow(QMainWindow):
     def set_source_dir(self, folder: Path) -> None:
         self.source_dir = Path(folder)
         self.source_label.setText(str(self.source_dir))
-        if not self.output_edit.text():
+        if not self.output_edit.text() or self.output_edit.text() == self._auto_output:
             out_dir = Path(load_settings().output_path or self.source_dir.parent)
             self.set_output_path(out_dir / f"{self.source_dir.name}.xlsx")
+            self._auto_output = self.output_edit.text()
         self._update_buttons()
 
     def set_output_path(self, path: Path) -> None:
@@ -176,6 +179,12 @@ class MainWindow(QMainWindow):
 
     def _start_run(self) -> None:
         kw = self._pipeline_kwargs()
+        if kw["xlsx"].exists():
+            answer = QMessageBox.question(self, "上書きの確認",
+                                          f"{kw['xlsx'].name} は既にあります。上書きしますか？\n"
+                                          "（同じ名前の PDF・JSON も上書きされます）")
+            if answer != QMessageBox.StandardButton.Yes:
+                return
         self._start(RunWorker("run", source_dir=self.source_dir, gemini_key=get_secret("gemini_api_key") or "", **kw))
 
     def _start_rebuild(self) -> None:
@@ -230,10 +239,14 @@ class MainWindow(QMainWindow):
             self.master_label.setText("単重マスタ: 設定画面でスプレッドシートの URL と Google の API キーを入力してください")
             return
         self.master_label.setText("単重マスタ: 取得中…")
-        self.master_worker = MasterWorker(s.sheet_url, s.sheet_name, key)
-        self.master_worker.finished_ok.connect(self._on_master)
-        self.master_worker.failed.connect(lambda m: self.master_label.setText(f"単重マスタ: {m}"))
-        self.master_worker.start()
+        worker = MasterWorker(s.sheet_url, s.sheet_name, key)
+        worker.finished_ok.connect(lambda m, w, me=worker: me is self.master_worker and self._on_master(m, w))
+        worker.failed.connect(lambda m, me=worker: me is self.master_worker and
+                              self.master_label.setText(f"単重マスタ: {m}"))
+        worker.finished.connect(lambda me=worker: self._master_workers.remove(me))
+        self._master_workers.append(worker)
+        self.master_worker = worker
+        worker.start()
 
     def _on_master(self, master: Master, warnings: list) -> None:
         self.master = master
@@ -282,4 +295,6 @@ class MainWindow(QMainWindow):
         if self._busy():
             self.worker.cancel()
             self.worker.wait(30000)
+        for w in list(self._master_workers):
+            w.wait(20000)
         super().closeEvent(event)

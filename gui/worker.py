@@ -6,13 +6,14 @@ from typing import Literal
 from PySide6.QtCore import QThread, Signal
 
 from millsheet import paths
-from millsheet.extract import Cancelled, ReaderAuthError
+from millsheet.extract import Cancelled, ReaderAuthError, ReaderRequestError
 from millsheet.master import MasterFetchError, MasterValidationError, fetch_master
 from millsheet.pipeline import rebuild, run
 
 log = logging.getLogger(__name__)
 
-EXPECTED_ERRORS = (MasterFetchError, MasterValidationError, ReaderAuthError, ValueError, FileNotFoundError)
+EXPECTED_ERRORS = (MasterFetchError, MasterValidationError, ReaderAuthError, ReaderRequestError, ValueError,
+                   FileNotFoundError)
 
 
 def friendly_error(e: Exception) -> str:

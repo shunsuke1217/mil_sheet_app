@@ -45,8 +45,9 @@ class RunResult:
 
 def outputs_for(xlsx: Path) -> Outputs:
     xlsx = Path(xlsx)
-    stem = xlsx.with_suffix("")
-    return Outputs(xlsx, stem.with_suffix(".json"), Path(f"{stem}_raw.json"), stem.with_suffix(".pdf"))
+    stem = xlsx.stem   # 「2026.10.17.xlsx」でも最後の拡張子だけを外す
+    return Outputs(xlsx, xlsx.with_name(f"{stem}.json"), xlsx.with_name(f"{stem}_raw.json"),
+                   xlsx.with_name(f"{stem}.pdf"))
 
 
 def _locked_message(e: OutputLockedError) -> str:
@@ -108,6 +109,7 @@ def run(source_dir: Path, xlsx: Path, *, settings: Settings, gemini_key: str, go
     loader = _master_loader(settings, google_key, master_loader)
     if not list_pdfs(source_dir):
         raise ValueError(f"フォルダに PDF がありません: {source_dir}")
+    Path(xlsx).parent.mkdir(parents=True, exist_ok=True)   # 読み終えてから保存できないのを防ぐ
     log.info("読み取りを始めます: %s → %s", source_dir, xlsx)
     master, warnings = loader()           # 課金の前にマスタを確かめる
     pages = read_folder(source_dir, reader or GeminiReader(gemini_key), PageCache(paths.cache_dir()),
