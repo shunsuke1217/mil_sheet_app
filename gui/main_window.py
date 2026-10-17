@@ -11,7 +11,7 @@ from gui.settings_dialog import SettingsDialog
 from gui.worker import MasterWorker, RunWorker
 from millsheet.master import Master
 from millsheet.pipeline import RunResult, outputs_for, review_messages
-from millsheet.settings import get_secret, load_settings
+from millsheet.settings import get_secret, load_settings, save_settings
 
 
 INVALID_NAME_CHARS = ["/", "\\", ":", "*", "?", '"', "<", ">", "|"]
@@ -57,7 +57,6 @@ class MainWindow(QMainWindow):
         self.master_worker = None
         self._master_workers: list = []   # 動いている間は参照を持ち続ける（途中で捨てると落ちる）
         self._auto_name = ""              # 自動で入れたフォルダ名（ユーザーが変えていなければ PDF のフォルダに合わせて替える）
-        self._base_override: Path | None = None   # 「場所を変える…」で選んだ出力先（この実行だけ）
         self.open_folder_on_finish = open_folder_on_finish
 
         self.drop = DropArea(self.set_source_dir)
@@ -68,7 +67,9 @@ class MainWindow(QMainWindow):
         self.output_name_edit = QLineEdit()
         self.output_name_edit.setPlaceholderText("出力フォルダの名前")
         self.output_name_edit.textChanged.connect(self._update_buttons)
-        browse = QPushButton("場所を変える…")
+        self.output_base_label = QLabel()
+        self.output_base_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        browse = QPushButton("選ぶ…")
         browse.clicked.connect(self._choose_output_base)
         self.output_path_label = QLabel()
         self.output_path_label.setWordWrap(True)
@@ -109,9 +110,10 @@ class MainWindow(QMainWindow):
         settings_button = QPushButton("設定")
         settings_button.clicked.connect(self._show_settings)
 
-        src_row = QHBoxLayout(); src_row.addWidget(self.source_label, 1); src_row.addWidget(choose)
+        src_row = QHBoxLayout(); src_row.addWidget(QLabel("PDF のフォルダ")); src_row.addWidget(self.source_label, 1); src_row.addWidget(choose)
+        base_row = QHBoxLayout(); base_row.addWidget(QLabel("保存する場所")); base_row.addWidget(self.output_base_label, 1)
+        base_row.addWidget(browse)
         out_row = QHBoxLayout(); out_row.addWidget(QLabel("出力フォルダ名")); out_row.addWidget(self.output_name_edit, 1)
-        out_row.addWidget(browse)
         run_row = QHBoxLayout(); run_row.addWidget(self.run_button); run_row.addWidget(self.cancel_button)
         run_row.addWidget(self.progress, 1)
         open_row = QHBoxLayout()
@@ -124,6 +126,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout()
         layout.addWidget(self.drop)
         layout.addLayout(src_row)
+        layout.addLayout(base_row)
         layout.addLayout(out_row)
         layout.addWidget(self.output_path_label)
         layout.addLayout(run_row)
@@ -144,17 +147,29 @@ class MainWindow(QMainWindow):
     def set_source_dir(self, folder: Path) -> None:
         self.source_dir = Path(folder)
         self.source_label.setText(str(self.source_dir))
-        if not self.output_name_edit.text() or self.output_name_edit.text() == self._auto_name:
-            name = self.source_dir.name
-            if self._output_base() == self.source_dir.parent:
-                name += "_出力"   # PDF のフォルダの隣に置くので、同じ名前にならないようにする
-            self.output_name_edit.setText(name)
-            self._auto_name = name
+        self._refresh_auto_name()
         self._update_buttons()
 
+    def set_output_base(self, folder: Path) -> None:
+        """出力フォルダを作る場所を決める。次回も同じ場所を使えるよう設定に保存する。"""
+        settings = load_settings()
+        settings.output_path = str(folder)
+        save_settings(settings)
+        self._refresh_auto_name()
+        self._update_buttons()
+
+    def _refresh_auto_name(self) -> None:
+        if self.source_dir is None:
+            return
+        if self.output_name_edit.text() and self.output_name_edit.text() != self._auto_name:
+            return   # ユーザーが付けた名前はそのまま
+        name = self.source_dir.name
+        if self._output_base() == self.source_dir.parent:
+            name += "_出力"   # PDF のフォルダの隣に置くので、同じ名前にならないようにする
+        self.output_name_edit.setText(name)
+        self._auto_name = name
+
     def _output_base(self) -> Path | None:
-        if self._base_override:
-            return self._base_override
         configured = load_settings().output_path
         if configured:
             return Path(configured)
@@ -183,14 +198,15 @@ class MainWindow(QMainWindow):
     def _choose_output_base(self) -> None:
         d = QFileDialog.getExistingDirectory(self, "出力フォルダを作る場所", str(self._output_base() or ""))
         if d:
-            self._base_override = Path(d)
-            self._update_buttons()
+            self.set_output_base(Path(d))
 
     def _busy(self) -> bool:
         return self.worker is not None and self.worker.isRunning()
 
     def _update_buttons(self) -> None:
         busy = self._busy()
+        configured = load_settings().output_path
+        self.output_base_label.setText(configured or "未設定（PDF のフォルダの隣に作ります）")
         problem = self._output_problem()
         out = self.output_dir()
         if self.source_dir is None:

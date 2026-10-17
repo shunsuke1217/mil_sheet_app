@@ -153,3 +153,21 @@ def test_existing_output_asks_before_overwrite(qtbot, tmp_path, monkeypatch):
     monkeypatch.setattr(QMessageBox, "question", asked)
     w._start_run()
     assert asked.called and w.worker is None
+
+
+def test_output_base_chosen_on_main_window_is_remembered(qtbot, tmp_path):
+    from millsheet.settings import load_settings
+    (tmp_path / "現場A").mkdir()
+    w = MainWindow(fetch_on_start=False, open_folder_on_finish=False); qtbot.addWidget(w)
+    w.set_source_dir(tmp_path / "現場A")
+    w.set_output_base(tmp_path / "出力")
+    assert w.output_dir() == tmp_path / "出力/現場A"     # PDF の隣ではなくなったので「_出力」は付けない
+    assert load_settings().output_path == str(tmp_path / "出力")
+    assert str(tmp_path / "出力") in w.output_base_label.text()
+    w2 = MainWindow(fetch_on_start=False, open_folder_on_finish=False); qtbot.addWidget(w2)
+    assert str(tmp_path / "出力") in w2.output_base_label.text()
+
+
+def test_output_base_label_when_unset(qtbot):
+    w = MainWindow(fetch_on_start=False, open_folder_on_finish=False); qtbot.addWidget(w)
+    assert "PDF のフォルダの隣" in w.output_base_label.text()
