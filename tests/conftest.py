@@ -82,3 +82,30 @@ def two_pdfs(tmp_path):
     make_pdf(tmp_path / "A.pdf", 2)
     make_pdf(tmp_path / "sub/B.pdf", 1)
     return tmp_path
+
+
+@pytest.fixture
+def sample_folder(sample_pdf, tmp_path):
+    import shutil
+    d = tmp_path / "src"
+    d.mkdir()
+    shutil.copy(sample_pdf, d / sample_pdf.name)
+    return d
+
+
+@pytest.fixture
+def fake_reader(sample_pdf, sample_pages):
+    """サンプル PDF の各ページの PNG → sample_raw.json の結果。並列で呼ばれてもページとずれない。"""
+    from tests.helpers import FakeReader, png_hash
+    results = {png_hash(sample_pdf, e.page_no): e.result for e in sample_pages if e.file == sample_pdf.name}
+    return FakeReader(results=results)
+
+
+def _fixture_master_loader():
+    from millsheet.master import load_master_file
+    return load_master_file(FIXTURES / "unit_weights.json"), []
+
+
+@pytest.fixture
+def fixture_master_loader():
+    return _fixture_master_loader
