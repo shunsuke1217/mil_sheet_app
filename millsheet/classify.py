@@ -2,6 +2,8 @@
 import re
 import unicodedata
 
+from millsheet.sizes import symbol_before_dimension
+
 # 優先度の小さい順。最初に当たったものを品名にする
 KEYWORDS: list[tuple[str, list[str]]] = [
     ("デッキ", ["DECK", "DECK PLATE", "デッキプレート", "デッキ"]),
@@ -50,6 +52,7 @@ def classify(commodity_raw: str | None, size_raw: str | None) -> str | None:
         for category, matchers in _MATCHERS:
             if any(m(text) for m in matchers):
                 return category
-    if size_raw and _normalize(size_raw).strip().startswith("L"):
+    # 寸法による補助ルール: 寸法が L で始まる、または寸法の並びの直前の記号が L（"K12 L65X65X6" など）
+    if size_raw and (_normalize(size_raw).strip().startswith("L") or symbol_before_dimension(size_raw) == "L"):
         return "アングル"
     return None

@@ -4,6 +4,9 @@ import unicodedata
 from decimal import ROUND_HALF_UP, Decimal
 
 _NUMBER = re.compile(r"\d+(?:\.\d+)?")
+# 寸法 = 区切り記号（X × * /）でつながった数字の並び（例: 2.3X100X50X20、19 X 2438 X 12192、200X100X5.5/8）
+_DIMENSION = re.compile(r"\d+(?:\.\d+)?(?:\s*[X×*/]\s*\d+(?:\.\d+)?)+")
+_THOUSANDS = re.compile(r"(?<=\d),(?=\d{3})")
 
 # 品名 → (記号, 並べ方)
 _RULES = {
@@ -26,6 +29,44 @@ def parse_numbers(text: str | None) -> list[float]:
     return [float(m) for m in _NUMBER.findall(t)]
 
 
+def _prepare(text: str) -> str:
+    return _THOUSANDS.sub("", unicodedata.normalize("NFKC", text)).upper()
+
+
+def _dimension_match(text: str | None) -> tuple[str, re.Match] | None:
+    if not text:
+        return None
+    t = _prepare(text)
+    matches = list(_DIMENSION.finditer(t))
+    if not matches:
+        return None
+    # 製品番号・色などの前後の文字は捨て、数字のいちばん多い並びを寸法とする（同じなら先に出てくる方）
+    best = max(matches, key=lambda m: (len(_NUMBER.findall(m.group())), -m.start()))
+    return t, best
+
+
+def extract_dimension(text: str | None) -> str | None:
+    """寸法の文字列から、寸法らしい部分（区切りでつながった数字の並び）だけを取り出す。"""
+    found = _dimension_match(text)
+    return found[1].group() if found else None
+
+
+def symbol_before_dimension(text: str | None) -> str:
+    """寸法の並びの直前にある記号（例: "K12 L65X65X6" → "L"）。単語の末尾の文字は記号とみなさない。"""
+    found = _dimension_match(text)
+    if not found:
+        return ""
+    t, m = found
+    head = re.search(r"(?<![A-Z])([A-Z]{1,2})[\s\-]*$", t[:m.start()])
+    return head.group(1) if head else ""
+
+
+def dimension_numbers(size_raw: str | None) -> list[float]:
+    """寸法の数字。並びが見つからなければ（φ22 など）全部の数字。"""
+    dim = extract_dimension(size_raw)
+    return parse_numbers(dim if dim is not None else size_raw)
+
+
 def fmt_num(x: float) -> str:
     return str(int(x)) if float(x).is_integer() else format(Decimal(str(x)).normalize(), "f")
 
@@ -36,7 +77,7 @@ def _reverse_if_needed(nums: list[float]) -> list[float]:
 
 
 def normalize_size(category: str | None, size_raw: str | None) -> str | None:
-    nums = parse_numbers(size_raw)
+    nums = dimension_numbers(size_raw)
     if not nums:
         return None
     prefix, rule = _RULES.get(category, ("", "as_is"))

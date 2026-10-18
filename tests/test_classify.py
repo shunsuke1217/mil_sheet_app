@@ -39,3 +39,12 @@ def test_no_keyword_is_shadowed_by_an_earlier_one():
     for category, words in KEYWORDS:
         for w in words:
             assert classify(w, None) == category, f"「{w}」が {classify(w, None)} に判定される"
+
+
+@pytest.mark.parametrize("raw,size,expected", [
+    ("一般構造用形鋼", "K12 L65X65X6", "アングル"),       # 寸法の直前の L を見る
+    ("一般構造用形鋼", "K12 L 65X65X6", "アングル"),
+    ("一般構造用形鋼", "COIL 65X65X6", None),             # 単語の末尾の L は記号ではない
+])
+def test_angle_rule_looks_at_symbol_before_dimension(raw, size, expected):
+    assert classify(raw, size) == expected
