@@ -17,21 +17,23 @@ class MergeError(Exception):
 def merge_pages(pages: list[PageRef], source_dir: Path, out_path: Path) -> None:
     sources: dict[str, pymupdf.Document] = {}
     missing = []
-    for file, _ in pages:
-        if file in sources or file in missing:
-            continue
+    try:  # 途中で止めても、開けた PDF は必ず閉じる（Windows では閉じないと使用中のまま残る）
+        for file, _ in pages:
+            if file in sources or file in missing:   # 同じファイルは 1 回だけ開く（失敗したものも試し直さない）
+                continue
+            try:
+                sources[file] = pymupdf.open(Path(source_dir) / file)
+            except (pymupdf.FileNotFoundError, pymupdf.FileDataError, RuntimeError):
+                missing.append(file)
+        if missing:
+            raise MergeError(missing)
+        out = pymupdf.open()
         try:
-            sources[file] = pymupdf.open(Path(source_dir) / file)
-        except (pymupdf.FileNotFoundError, pymupdf.FileDataError, RuntimeError):
-            missing.append(file)
-    if missing:
-        raise MergeError(missing)
-    out = pymupdf.open()
-    try:
-        for file, page_no in pages:
-            out.insert_pdf(sources[file], from_page=page_no - 1, to_page=page_no - 1)
-        save_atomic(Path(out_path), lambda p: out.save(p, garbage=3, deflate=True))
+            for file, page_no in pages:
+                out.insert_pdf(sources[file], from_page=page_no - 1, to_page=page_no - 1)
+            save_atomic(Path(out_path), lambda p: out.save(p, garbage=3, deflate=True))
+        finally:
+            out.close()
     finally:
-        out.close()
         for d in sources.values():
             d.close()
