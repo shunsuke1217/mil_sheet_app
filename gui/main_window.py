@@ -18,7 +18,12 @@ INVALID_NAME_CHARS = ["/", "\\", ":", "*", "?", '"', "<", ">", "|"]
 
 
 class DropArea(QLabel):
-    """PDF のフォルダをドロップする枠。"""
+    """PDF のフォルダをドロップする枠。フォルダを持ってくると枠を強調し、落とすと受け取ったと返す。"""
+
+    STYLE = """
+        QLabel { border: 2px dashed #999; border-radius: 8px; font-size: 15px; }
+        QLabel[dragging="true"] { border: 2px solid #2563eb; background: rgba(37, 99, 235, 0.08); }
+    """
 
     def __init__(self, on_folder):
         super().__init__("ここに PDF のフォルダをドロップ")
@@ -27,7 +32,13 @@ class DropArea(QLabel):
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setMinimumHeight(110)
         self.setFrameShape(QFrame.Shape.StyledPanel)
-        self.setStyleSheet("QLabel { border: 2px dashed #999; border-radius: 8px; font-size: 15px; }")
+        self.setStyleSheet(self.STYLE)
+        self._set_dragging(False)
+
+    def _set_dragging(self, on: bool) -> None:
+        self.setProperty("dragging", on)
+        self.style().unpolish(self)   # プロパティに合わせて見た目を付け直す
+        self.style().polish(self)
 
     def _folder(self, event) -> Path | None:
         urls = event.mimeData().urls()
@@ -35,14 +46,35 @@ class DropArea(QLabel):
             return Path(urls[0].toLocalFile())
         return None
 
+    def _accept_as_copy(self, event) -> None:
+        # 「コピーとして受け取った」と返す。返さないと Mac はドロップが断られたとみなし、アイコンを元の場所へ戻す
+        event.setDropAction(Qt.DropAction.CopyAction)
+        event.accept()
+
     def dragEnterEvent(self, event):
         if self._folder(event):
-            event.acceptProposedAction()
+            self._accept_as_copy(event)
+            self._set_dragging(True)
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        if self._folder(event):
+            self._accept_as_copy(event)
+        else:
+            event.ignore()
+
+    def dragLeaveEvent(self, event):
+        self._set_dragging(False)
 
     def dropEvent(self, event):
+        self._set_dragging(False)
         folder = self._folder(event)
         if folder:
+            self._accept_as_copy(event)
             self.on_folder(folder)
+        else:
+            event.ignore()
 
 
 class MainWindow(QMainWindow):

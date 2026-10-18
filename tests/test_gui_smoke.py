@@ -2,6 +2,8 @@ import shutil
 from pathlib import Path
 from unittest.mock import Mock
 
+from PySide6.QtCore import Qt
+
 from gui.main_window import MainWindow
 from gui.master_dialog import MasterDialog
 from gui.settings_dialog import SettingsDialog
@@ -176,3 +178,46 @@ def test_output_base_label_when_unset(qtbot):
 def test_master_dialog_uses_material_type_wording(qtbot):
     d = MasterDialog(load_master_file(Path("tests/fixtures/unit_weights.json"))); qtbot.addWidget(d)
     assert d.table.horizontalHeaderItem(0).text() == "材種" and d.category_combo.itemText(0) == "すべての材種"
+
+
+def _drag_events(folder):
+    from PySide6.QtCore import QMimeData, QPoint, QPointF, QUrl
+    from PySide6.QtGui import QDragEnterEvent, QDropEvent
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(str(folder))])
+    enter = QDragEnterEvent(QPoint(10, 10), Qt.DropAction.CopyAction | Qt.DropAction.MoveAction, mime,
+                            Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    drop = QDropEvent(QPointF(10, 10), Qt.DropAction.CopyAction | Qt.DropAction.MoveAction, mime,
+                      Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    return mime, enter, drop
+
+
+def test_drop_is_reported_as_accepted_copy(qtbot, tmp_path):
+    """Mac で「受け取った」と返さないと、ドラッグしたアイコンが元の場所へ戻るアニメーションになる。"""
+    w = MainWindow(fetch_on_start=False, open_folder_on_finish=False); qtbot.addWidget(w)
+    mime, _, drop = _drag_events(tmp_path)   # mime は保持しておく（解放されると落ちる）
+    drop.ignore()
+    w.drop.dropEvent(drop)
+    assert drop.isAccepted() and drop.dropAction() == Qt.DropAction.CopyAction
+    assert w.source_dir == tmp_path
+
+
+def test_drop_area_highlights_while_dragging(qtbot, tmp_path):
+    w = MainWindow(fetch_on_start=False, open_folder_on_finish=False); qtbot.addWidget(w)
+    from PySide6.QtGui import QDragLeaveEvent
+    mime, enter, drop = _drag_events(tmp_path)
+    w.drop.dragEnterEvent(enter)
+    assert enter.isAccepted() and w.drop.property("dragging") is True
+    w.drop.dragLeaveEvent(QDragLeaveEvent())
+    assert w.drop.property("dragging") is False
+    w.drop.dragEnterEvent(enter); w.drop.dropEvent(drop)
+    assert w.drop.property("dragging") is False
+
+
+def test_file_drop_is_refused(qtbot, tmp_path):
+    (tmp_path / "a.pdf").write_bytes(b"%PDF")
+    w = MainWindow(fetch_on_start=False, open_folder_on_finish=False); qtbot.addWidget(w)
+    mime, enter, _ = _drag_events(tmp_path / "a.pdf")
+    enter.ignore()
+    w.drop.dragEnterEvent(enter)
+    assert not enter.isAccepted() and w.drop.property("dragging") is not True
