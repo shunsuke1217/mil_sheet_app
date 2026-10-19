@@ -26,7 +26,7 @@ def test_run_writes_all_outputs(tmp_path, sample_folder, fake_reader):
     o = res.outputs
     assert o.xlsx.exists() and o.json.exists() and o.raw.exists() and o.pdf.exists()
     assert pymupdf.open(o.pdf).page_count == 10 and res.errors == []
-    assert [r.weight for r in res.records] == [574, 292, 5287, 4567, 1428, 52, 1948, 520, 33, 163]
+    assert [r.mass_kg for r in res.records] == [10332, 1460, 5287, 4567, 1632, 3708, 7305, 1950, 3640, 2015]
 
 
 
@@ -92,7 +92,7 @@ def test_run_puts_only_xlsx_and_pdf_at_top_of_folder(tmp_path):
 def test_run_with_one_concatenated_pdf_matches_folder(tmp_path, sample_folder, fake_reader):
     pdf = next(sample_folder.glob("*.pdf"))
     res = run([pdf], tmp_path / "out", reader=fake_reader, **KW)
-    assert [r.weight for r in res.records] == [574, 292, 5287, 4567, 1428, 52, 1948, 520, 33, 163]
+    assert [r.mass_kg for r in res.records] == [10332, 1460, 5287, 4567, 1632, 3708, 7305, 1950, 3640, 2015]
     assert pymupdf.open(res.outputs.pdf).page_count == 10 and res.errors == []
 
 

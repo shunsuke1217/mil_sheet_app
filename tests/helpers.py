@@ -28,7 +28,7 @@ def rec(**kw):
         _rec_counter[0] += 1
     d = dict(file=kw.pop("file", f"p{i}.pdf"), page_no=kw.pop("page", 1), category=kw.pop("cat", "H形鋼"),
              grade="SS400", size=kw.pop("size", "Ｈ-200×200×8×12"), length_mm=kw.pop("length", 11500), qty=1,
-             weight=574, reasons=kw.pop("reasons", []), input_index=i)
+             printed_qty=18, mass_kg=10332, reasons=kw.pop("reasons", []), input_index=i)
     d.update(kw)
     return Record(**d)
 

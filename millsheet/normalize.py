@@ -1,6 +1,5 @@
-"""読み取り結果からレコードを作り、計算・チェックする（SPEC 8.4、8.5、9章）。"""
+"""読み取り結果からレコードを作り、正規化・チェックする（SPEC 8章、9章）。重量は xlsx の数式で出す（8.5 節）。"""
 from dataclasses import dataclass
-from decimal import ROUND_HALF_UP, Decimal
 from typing import Literal
 
 from millsheet.classify import classify
@@ -27,7 +26,8 @@ class Record:
     size: str | None
     length_mm: int | None
     qty: int | None
-    weight: int | None
+    printed_qty: int | None    # 元本数（印字された員数）
+    mass_kg: float | None      # 証明書に印字された質量
     reasons: list[str]
     input_index: int
     kind: Literal["line", "no_lines", "not_certificate", "error"] = "line"   # no_lines: 証明書だが行が 1 つも返らなかった
@@ -46,31 +46,15 @@ class Record:
             "寸法": self.size,
             "長さ_mm": self.length_mm,
             "本数": self.qty,
-            "重量": self.weight,
             "要確認": self.needs_review(),
             "確認理由": list(self.reasons),
+            "元本数": self.printed_qty,
+            "質量": self.mass_kg,
         }
 
 
-def _round(x: Decimal) -> int:
-    return int(x.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
-
-
-def _d(x: float) -> Decimal:
-    return Decimal(str(x))
-
-
 def _empty(entry: PageEntry, index: int, kind: str, reasons: list[str]) -> Record:
-    return Record(entry.file, entry.page_no, None, None, None, None, None, None, reasons, index, kind)
-
-
-def _weight(ln: Line, qty: int | None) -> int | None:
-    """重量 = 証明書の質量 ÷ 員数 × 使った本数。すべて使ったとき（本数 ≧ 員数）は質量そのまま。"""
-    if qty is None or ln.mass_kg is None or not ln.printed_qty:
-        return None
-    if qty >= ln.printed_qty:
-        return _round(_d(ln.mass_kg))
-    return _round(_d(ln.mass_kg) / ln.printed_qty * qty)
+    return Record(entry.file, entry.page_no, None, None, None, None, None, None, None, reasons, index, kind)
 
 
 def _line_record(entry: PageEntry, ln: Line, index: int, stamp_reason: str | None) -> Record:
@@ -79,7 +63,6 @@ def _line_record(entry: PageEntry, ln: Line, index: int, stamp_reason: str | Non
     size = normalize_size(category, ln.size_raw)
     length = None if is_pl else parse_length_mm(ln.length_raw)
     qty = ln.circled_qty if ln.circle_status == "あり" else None
-    weight = _weight(ln, qty)
     reasons: list[str] = []
 
     # 9章のチェック（番号順）
@@ -90,18 +73,19 @@ def _line_record(entry: PageEntry, ln: Line, index: int, stamp_reason: str | Non
     required = [("材種", category), ("材質", ln.grade), ("寸法", size)]
     if not is_pl:
         required.append(("長さ", length))
-    required += [("本数", qty), ("質量", ln.mass_kg), ("員数", ln.printed_qty or None), ("重量", weight)]
+    required += [("本数", qty), ("元本数", ln.printed_qty or None), ("質量", ln.mass_kg)]
     missing = [name for name, v in required if v is None or v == ""]
     if missing:
         reasons.append(R_MISSING.format("、".join(missing)))
     if ln.uncertain:
         reasons.append(R_UNCERTAIN.format(f"（{ln.note}）" if ln.note else ""))
-    if qty is not None and ln.printed_qty is not None and qty > ln.printed_qty:
+    if qty is not None and ln.printed_qty and qty > ln.printed_qty:   # 0 は読めなかったものとして元本数の空で知らせる
         reasons.append(R_OVER_QTY.format(qty, ln.printed_qty))
     if stamp_reason:
         reasons.append(stamp_reason)
 
-    return Record(entry.file, entry.page_no, category, ln.grade, size, length, qty, weight, reasons, index)
+    return Record(entry.file, entry.page_no, category, ln.grade, size, length, qty, ln.printed_qty, ln.mass_kg,
+                  reasons, index)
 
 
 def _stamp_reason(result: PageResult) -> str | None:

@@ -10,14 +10,14 @@ from tests.test_normalize import EXPECTED
 
 pytestmark = pytest.mark.skipif(not os.environ.get("GEMINI_API_KEY"), reason="GEMINI_API_KEY がありません")
 
-FIELDS = ["ページ", "材種", "材質", "寸法", "長さ", "本数", "重量"]
+FIELDS = ["ページ", "材種", "材質", "寸法", "長さ", "本数", "元本数", "質量"]
 
 
 def test_sample_pdf_matches_acceptance_table(sample_pdf):
     reader = GeminiReader(os.environ["GEMINI_API_KEY"])
     pages = [PageEntry(sample_pdf.name, n, reader.read(render_png(sample_pdf, n))) for n in range(1, 11)]
     recs = build_records(pages)
-    got = [(r.page_no, r.category, r.grade, r.size, r.length_mm, r.qty, r.weight) for r in recs]
+    got = [(r.page_no, r.category, r.grade, r.size, r.length_mm, r.qty, r.printed_qty, r.mass_kg) for r in recs]
     total = matched = 0
     for g, e in zip(got, EXPECTED):
         for name, gv, ev in zip(FIELDS, g, e):
