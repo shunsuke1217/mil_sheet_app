@@ -120,3 +120,30 @@ def test_rebuild_without_raw_is_reported(tmp_path):
     (tmp_path / "o").mkdir()
     with pytest.raises(FileNotFoundError, match="作り直せません"):
         rebuild(tmp_path / "o", settings=Settings(), master_loader=_fixture_master_loader)
+
+
+def test_run_with_one_concatenated_pdf_matches_folder(tmp_path, sample_folder, fake_reader, fixture_master_loader):
+    pdf = next(sample_folder.glob("*.pdf"))
+    res = run([pdf], tmp_path / "out", reader=fake_reader, master_loader=fixture_master_loader, **KW)
+    assert [r.weight for r in res.records] == [574, 293, 5287, 4567, 1432, 51, 1949, 520, 33, 163]
+    assert pymupdf.open(res.outputs.pdf).page_count == 10
+    again = rebuild(tmp_path / "out", settings=Settings(), master_loader=fixture_master_loader)
+    assert again.outputs.pdf.exists() and again.errors == []
+
+
+def test_run_with_files_from_different_folders(tmp_path):
+    make_pdf(tmp_path / "A/a.pdf", 1); make_pdf(tmp_path / "B/b.pdf", 1); make_pdf(tmp_path / "B/読まない.pdf", 1)
+    reader = FakeReader()
+    res = run([tmp_path / "A/a.pdf", tmp_path / "B/b.pdf"], tmp_path / "o", reader=reader,
+              master_loader=_fixture_master_loader, **KW)
+    assert reader.calls == 2 and sorted(r.file for r in res.records) == ["A/a.pdf", "B/b.pdf"]
+    again = rebuild(tmp_path / "o", settings=Settings(), master_loader=_fixture_master_loader)
+    assert pymupdf.open(again.outputs.pdf).page_count == 2 and again.errors == []
+
+
+def test_non_pdf_file_is_reported_before_reading(tmp_path):
+    (tmp_path / "表.xlsx").write_text("x")
+    reader = FakeReader()
+    with pytest.raises(ValueError, match="PDF ではない"):
+        run([tmp_path / "表.xlsx"], tmp_path / "o", reader=reader, master_loader=_fixture_master_loader, **KW)
+    assert reader.calls == 0

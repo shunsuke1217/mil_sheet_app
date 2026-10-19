@@ -6,8 +6,8 @@ import pytest
 
 from millsheet import extract
 from millsheet.cache import PageCache, file_hash
-from millsheet.extract import (Cancelled, GeminiReader, PageReadError, ReaderAuthError, inline_refs, list_pdfs,
-                               read_folder, render_png)
+from millsheet.extract import (Cancelled, GeminiReader, InputError, PageReadError, ReaderAuthError, inline_refs, list_pdfs,
+                               read_folder, render_png, resolve_inputs)
 from millsheet.schema import PageEntry, PageResult
 from tests.helpers import FakeReader, make_pdf, page_result
 
@@ -127,3 +127,73 @@ def test_inline_refs_removes_defs():
 
 def test_model_constant():
     assert extract.MODEL == "gemini-3.8-flash"
+
+
+# 入力（フォルダ・PDF ファイル・混ぜたもの）
+def test_resolve_inputs_folder_is_same_as_list_pdfs(tmp_path):
+    make_pdf(tmp_path / "src/b.pdf", 1); make_pdf(tmp_path / "src/sub/a.pdf", 1)
+    s = resolve_inputs([tmp_path / "src"])
+    assert s.base == (tmp_path / "src").resolve() and s.files == ["b.pdf", "sub/a.pdf"]
+
+
+def test_resolve_inputs_single_file(tmp_path):
+    make_pdf(tmp_path / "scan/連結.pdf", 3)
+    s = resolve_inputs([tmp_path / "scan/連結.pdf"])
+    assert s.base == (tmp_path / "scan").resolve() and s.files == ["連結.pdf"]
+
+
+def test_resolve_inputs_files_from_different_folders_use_common_parent(tmp_path):
+    make_pdf(tmp_path / "A/001.pdf", 1); make_pdf(tmp_path / "B/001.pdf", 1)
+    s = resolve_inputs([tmp_path / "B/001.pdf", tmp_path / "A/001.pdf"])
+    assert s.base == tmp_path.resolve() and s.files == ["A/001.pdf", "B/001.pdf"]
+
+
+def test_resolve_inputs_mixed_folder_and_files_without_duplicates(tmp_path):
+    make_pdf(tmp_path / "A/1.pdf", 1); make_pdf(tmp_path / "A/2.pdf", 1); make_pdf(tmp_path / "c.PDF", 1)
+    s = resolve_inputs([tmp_path / "A", tmp_path / "A/1.pdf", tmp_path / "c.PDF"])
+    assert s.base == tmp_path.resolve() and s.files == ["A/1.pdf", "A/2.pdf", "c.PDF"]
+
+
+def test_resolve_inputs_refuses_non_pdf_file(tmp_path):
+    make_pdf(tmp_path / "a.pdf", 1); (tmp_path / "表.xlsx").write_text("x")
+    with pytest.raises(InputError, match="表.xlsx"):
+        resolve_inputs([tmp_path / "a.pdf", tmp_path / "表.xlsx"])
+
+
+def test_resolve_inputs_refuses_missing_path(tmp_path):
+    with pytest.raises(InputError, match="見つかりません"):
+        resolve_inputs([tmp_path / "無い.pdf"])
+
+
+def test_resolve_inputs_refuses_when_no_pdf(tmp_path):
+    (tmp_path / "empty").mkdir()
+    with pytest.raises(InputError, match="PDF がありません"):
+        resolve_inputs([tmp_path / "empty"])
+
+
+def test_resolve_inputs_refuses_different_drives(tmp_path, monkeypatch):
+    make_pdf(tmp_path / "a.pdf", 1); make_pdf(tmp_path / "b.pdf", 1)
+
+    def commonpath(paths):
+        raise ValueError("Paths don't have the same drive")   # Windows で C: と D: を混ぜたとき
+    monkeypatch.setattr(extract.os.path, "commonpath", commonpath)
+    with pytest.raises(InputError, match="ドライブ"):
+        resolve_inputs([tmp_path / "a.pdf", tmp_path / "b.pdf"])
+
+
+def test_read_folder_reads_only_given_files(tmp_path):
+    make_pdf(tmp_path / "src/a.pdf", 1); make_pdf(tmp_path / "src/b.pdf", 2)
+    entries = read_folder(tmp_path / "src", FakeReader(), PageCache(tmp_path / "cache"), files=["b.pdf"])
+    assert [(e.file, e.page_no) for e in entries] == [("b.pdf", 1), ("b.pdf", 2)]
+
+
+def test_read_folder_keeps_the_list_taken_at_start(tmp_path):
+    """読み取り中に足された PDF が、結果から黙って抜けたり、途中で増えたりしない。"""
+    make_pdf(tmp_path / "src/a.pdf", 1)
+
+    class AddingReader(FakeReader):
+        def read(self, png):
+            make_pdf(tmp_path / "src/z.pdf", 1)
+            return super().read(png)
+    entries = read_folder(tmp_path / "src", AddingReader(), PageCache(tmp_path / "cache"), workers=1)
+    assert [(e.file, e.page_no) for e in entries] == [("a.pdf", 1)]

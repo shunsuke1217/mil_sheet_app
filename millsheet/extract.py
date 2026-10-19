@@ -2,9 +2,11 @@
 import base64
 import copy
 import logging
+import os
 import threading
 import time
 from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Protocol
 
@@ -33,6 +35,10 @@ class PageReadError(Exception):
     pass
 
 
+class InputError(ValueError):
+    """渡されたフォルダ・ファイルが読み取りに使えない。画面にそのまま出す。"""
+
+
 class ReaderAuthError(Exception):
     pass
 
@@ -49,6 +55,48 @@ def list_pdfs(folder: Path) -> list[str]:
     folder = Path(folder)
     return sorted(p.relative_to(folder).as_posix() for p in folder.rglob("*")
                   if p.is_file() and p.suffix.lower() == ".pdf")
+
+
+@dataclass(frozen=True)
+class SourceFiles:
+    base: Path          # 読み取る PDF すべてに共通するフォルダ（_raw.json と PDF の結合はここを基準にする）
+    files: list[str]    # base からの相対パス（"/" 区切り）
+
+
+def is_pdf_file(path: Path) -> bool:
+    return path.suffix.lower() == ".pdf" and not path.is_dir()
+
+
+def common_base(paths: list[Path]) -> Path:
+    """渡したフォルダ（PDF ファイルはその親）すべてに共通するフォルダ。"""
+    dirs = [str((p.parent if is_pdf_file(p) else p).resolve()) for p in paths]
+    try:
+        return Path(os.path.commonpath(dirs))
+    except ValueError:   # Windows で C: と D: のように別のドライブを混ぜたとき
+        raise InputError("別々のドライブにある PDF は一度に読み取れません。同じドライブにまとめてください") from None
+
+
+def resolve_inputs(paths: list[Path]) -> SourceFiles:
+    """PDF のフォルダ・PDF ファイル（混ぜてもよい）を、共通のフォルダとそこからの相対パスにそろえる。"""
+    paths = [Path(p) for p in paths]
+    if not paths:
+        raise InputError("PDF のフォルダかファイルを選んでください")
+    missing = [str(p) for p in paths if not p.exists()]
+    if missing:
+        raise InputError(f"見つかりません: {'、'.join(missing)}")
+    not_pdf = [p.name for p in paths if p.is_file() and p.suffix.lower() != ".pdf"]
+    if not_pdf:
+        raise InputError(f"PDF ではないファイルは読み取れません: {'、'.join(not_pdf)}")
+    base = common_base(paths)
+    files: set[str] = set()
+    for p in paths:
+        if p.is_dir():
+            files |= {(p.resolve() / rel).relative_to(base).as_posix() for rel in list_pdfs(p)}
+        else:
+            files.add(p.resolve().relative_to(base).as_posix())
+    if not files:
+        raise InputError(f"PDF がありません: {'、'.join(str(p) for p in paths)}")
+    return SourceFiles(base, sorted(files))
 
 
 def _open(pdf: Path) -> pymupdf.Document:
@@ -150,14 +198,16 @@ class GeminiReader:
         raise PageReadError(mask(f"{type(last).__name__}: {last}", [self.api_key])[:300])
 
 
-def read_folder(folder: Path, reader: PageReader, cache: PageCache, *, workers: int = 4,
-                on_progress: Callable[[str, int, int, int, int], None] = lambda *a: None,
+def read_folder(folder: Path, reader: PageReader, cache: PageCache, *, files: list[str] | None = None,
+                workers: int = 4, on_progress: Callable[[str, int, int, int, int], None] = lambda *a: None,
                 cancel: threading.Event | None = None) -> list[PageEntry]:
+    """folder の中の files（folder からの相対パス。省略するとフォルダの中の PDF すべて）を 1 ページずつ読む。"""
     folder = Path(folder)
+    files = list(files) if files is not None else list_pdfs(folder)   # 最初に決めた一覧を最後まで使う
     cancel = cancel or threading.Event()
     jobs: list[tuple[str, int, int, str]] = []          # (相対パス, ページ, そのファイルのページ数, ハッシュ)
     failed: dict[str, PageEntry] = {}
-    for rel in list_pdfs(folder):
+    for rel in files:
         try:
             n = page_count(folder / rel)
         except PdfOpenError as e:
@@ -217,7 +267,7 @@ def read_folder(folder: Path, reader: PageReader, cache: PageCache, *, workers: 
             raise errors[0]
 
     out = []
-    for rel in list_pdfs(folder):
+    for rel in files:
         if rel in failed:
             out.append(failed[rel])
         else:

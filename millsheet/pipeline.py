@@ -11,7 +11,7 @@ from millsheet.cache import PageCache
 from millsheet.export import get_exporter
 from millsheet.export.base import OutputLockedError
 from millsheet.export.json_out import write_json
-from millsheet.extract import GeminiReader, PageReader, list_pdfs, read_folder
+from millsheet.extract import GeminiReader, PageReader, read_folder, resolve_inputs
 from millsheet.master import Master, fetch_master
 from millsheet.merge_pdf import MergeError, merge_pages
 from millsheet.normalize import R_NO_MASTER, Record, build_records
@@ -103,24 +103,23 @@ def _build_and_export(pages: list[PageEntry], source_dir: Path | None, outputs: 
     return RunResult(ordered, outputs, master, warnings, errors)
 
 
-def run(source_dir: Path, out_dir: Path, *, settings: Settings, gemini_key: str,
+def run(sources: Path | list[Path], out_dir: Path, *, settings: Settings, gemini_key: str,
         reader: PageReader | None = None, workers: int = 4, master_loader: MasterLoader | None = None,
         on_progress: Callable[[str, int, int, int, int], None] = lambda *a: None,
         cancel: threading.Event | None = None) -> RunResult:
-    source_dir = Path(source_dir)
+    """sources は PDF のフォルダ・PDF ファイル（1 つでも、混ぜた複数でもよい）。"""
     if reader is None and not gemini_key:
         raise ValueError("設定画面で Gemini の API キーを入力してください")
     loader = _master_loader(settings, master_loader)
-    if not list_pdfs(source_dir):
-        raise ValueError(f"フォルダに PDF がありません: {source_dir}")
+    src = resolve_inputs([sources] if isinstance(sources, (str, Path)) else list(sources))
     outputs = outputs_for(out_dir)
     outputs.raw.parent.mkdir(parents=True, exist_ok=True)   # 読み終えてから保存できないのを防ぐ
-    log.info("読み取りを始めます: %s → %s", source_dir, outputs.dir)
+    log.info("読み取りを始めます: %s（%d ファイル）→ %s", src.base, len(src.files), outputs.dir)
     master, warnings = loader()           # 課金の前にマスタを確かめる
-    pages = read_folder(source_dir, reader or GeminiReader(gemini_key), PageCache(paths.cache_dir()),
-                        workers=workers, on_progress=on_progress, cancel=cancel)
-    write_raw(outputs.raw, source_dir, pages)
-    return _build_and_export(pages, source_dir, outputs, master, list(warnings), settings)
+    pages = read_folder(src.base, reader or GeminiReader(gemini_key), PageCache(paths.cache_dir()),
+                        files=src.files, workers=workers, on_progress=on_progress, cancel=cancel)
+    write_raw(outputs.raw, src.base, pages)
+    return _build_and_export(pages, src.base, outputs, master, list(warnings), settings)
 
 
 def rebuild(out_dir: Path, *, settings: Settings, master_loader: MasterLoader | None = None) -> RunResult:

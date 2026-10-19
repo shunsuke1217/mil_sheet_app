@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEd
 from gui.master_dialog import MasterDialog
 from gui.settings_dialog import SettingsDialog
 from gui.worker import MasterWorker, RunWorker
+from millsheet.extract import InputError, common_base, is_pdf_file
 from millsheet.master import Master
 from millsheet.pipeline import RunResult, outputs_for, review_messages
 from millsheet.settings import get_secret, load_settings, save_settings
@@ -18,16 +19,17 @@ INVALID_NAME_CHARS = ["/", "\\", ":", "*", "?", '"', "<", ">", "|"]
 
 
 class DropArea(QLabel):
-    """PDF のフォルダをドロップする枠。フォルダを持ってくると枠を強調し、落とすと受け取ったと返す。"""
+    """PDF のフォルダ・PDF ファイル（いくつでも、混ぜてもよい）をドロップする枠。
+    持ってくると枠を強調し、落とすと受け取ったと返す。PDF でないファイルが混ざっていれば受け取らない。"""
 
     STYLE = """
         QLabel { border: 2px dashed #999; border-radius: 8px; font-size: 15px; }
         QLabel[dragging="true"] { border: 2px solid #2563eb; background: rgba(37, 99, 235, 0.08); }
     """
 
-    def __init__(self, on_folder):
-        super().__init__("ここに PDF のフォルダをドロップ")
-        self.on_folder = on_folder
+    def __init__(self, on_paths):
+        super().__init__("ここに PDF のフォルダか PDF ファイルをドロップ（いくつでも）")
+        self.on_paths = on_paths
         self.setAcceptDrops(True)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setMinimumHeight(110)
@@ -40,11 +42,12 @@ class DropArea(QLabel):
         self.style().unpolish(self)   # プロパティに合わせて見た目を付け直す
         self.style().polish(self)
 
-    def _folder(self, event) -> Path | None:
+    def _paths(self, event) -> list[Path] | None:
         urls = event.mimeData().urls()
-        if len(urls) == 1 and urls[0].isLocalFile() and Path(urls[0].toLocalFile()).is_dir():
-            return Path(urls[0].toLocalFile())
-        return None
+        if not urls or not all(u.isLocalFile() for u in urls):
+            return None
+        paths = [Path(u.toLocalFile()) for u in urls]
+        return paths if all(p.is_dir() or (p.is_file() and is_pdf_file(p)) for p in paths) else None
 
     def _accept_as_copy(self, event) -> None:
         # 「コピーとして受け取った」と返す。返さないと Mac はドロップが断られたとみなし、アイコンを元の場所へ戻す
@@ -52,14 +55,14 @@ class DropArea(QLabel):
         event.accept()
 
     def dragEnterEvent(self, event):
-        if self._folder(event):
+        if self._paths(event):
             self._accept_as_copy(event)
             self._set_dragging(True)
         else:
             event.ignore()
 
     def dragMoveEvent(self, event):
-        if self._folder(event):
+        if self._paths(event):
             self._accept_as_copy(event)
         else:
             event.ignore()
@@ -69,10 +72,10 @@ class DropArea(QLabel):
 
     def dropEvent(self, event):
         self._set_dragging(False)
-        folder = self._folder(event)
-        if folder:
+        paths = self._paths(event)
+        if paths:
             self._accept_as_copy(event)
-            self.on_folder(folder)
+            self.on_paths(paths)
         else:
             event.ignore()
 
@@ -82,19 +85,21 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("ミルシート読み取り")
         self.resize(820, 680)
-        self.source_dir: Path | None = None
+        self.sources: list[Path] = []     # 渡された PDF のフォルダ・ファイル
         self.master: Master | None = None
         self.result: RunResult | None = None
         self.worker = None
         self.master_worker = None
         self._master_workers: list = []   # 動いている間は参照を持ち続ける（途中で捨てると落ちる）
-        self._auto_name = ""              # 自動で入れたフォルダ名（ユーザーが変えていなければ PDF のフォルダに合わせて替える）
+        self._auto_name = ""              # 自動で入れた名前（ユーザーが変えていなければ、渡した PDF に合わせて替える）
         self.open_folder_on_finish = open_folder_on_finish
 
-        self.drop = DropArea(self.set_source_dir)
+        self.drop = DropArea(self.set_sources)
         choose = QPushButton("フォルダを選ぶ…")
         choose.clicked.connect(self._choose_folder)
-        self.source_label = QLabel("フォルダが選ばれていません")
+        choose_files = QPushButton("ファイルを選ぶ…")
+        choose_files.clicked.connect(self._choose_files)
+        self.source_label = QLabel("まだ選ばれていません")
 
         self.output_name_edit = QLineEdit()
         self.output_name_edit.setPlaceholderText("出力フォルダの名前")
@@ -142,7 +147,8 @@ class MainWindow(QMainWindow):
         settings_button = QPushButton("設定")
         settings_button.clicked.connect(self._show_settings)
 
-        src_row = QHBoxLayout(); src_row.addWidget(QLabel("PDF のフォルダ")); src_row.addWidget(self.source_label, 1); src_row.addWidget(choose)
+        src_row = QHBoxLayout(); src_row.addWidget(QLabel("読み取る PDF")); src_row.addWidget(self.source_label, 1)
+        src_row.addWidget(choose); src_row.addWidget(choose_files)
         base_row = QHBoxLayout(); base_row.addWidget(QLabel("保存する場所")); base_row.addWidget(self.output_base_label, 1)
         base_row.addWidget(browse)
         out_row = QHBoxLayout(); out_row.addWidget(QLabel("出力フォルダ名")); out_row.addWidget(self.output_name_edit, 1)
@@ -176,9 +182,12 @@ class MainWindow(QMainWindow):
             self.refresh_master()
 
     # 入力
-    def set_source_dir(self, folder: Path) -> None:
-        self.source_dir = Path(folder)
-        self.source_label.setText(str(self.source_dir))
+    def set_sources(self, paths: list[Path]) -> None:
+        """読み取る PDF のフォルダ・ファイルを決める（混ぜてもよい）。"""
+        self.sources = [Path(p) for p in paths]
+        first = self.sources[0]
+        self.source_label.setText(str(first) if len(self.sources) == 1
+                                  else f"{first.name} ほか {len(self.sources) - 1} 件")
         self._refresh_auto_name()
         self._update_buttons()
 
@@ -191,13 +200,16 @@ class MainWindow(QMainWindow):
         self._update_buttons()
 
     def _refresh_auto_name(self) -> None:
-        if self.source_dir is None:
+        if not self.sources:
             return
         if self.output_name_edit.text() and self.output_name_edit.text() != self._auto_name:
             return   # ユーザーが付けた名前はそのまま
-        name = self.source_dir.name
-        if self._output_base() == self.source_dir.parent:
-            name += "_出力"   # PDF のフォルダの隣に置くので、同じ名前にならないようにする
+        first = self.sources[0]
+        name = first.stem if is_pdf_file(first) else first.name
+        if len(self.sources) > 1:
+            name += "ほか"
+        if self._output_base() == self._default_base():
+            name += "_出力"   # PDF の隣に置くので、同じ名前にならないようにする
         self.output_name_edit.setText(name)
         self._auto_name = name
 
@@ -205,7 +217,20 @@ class MainWindow(QMainWindow):
         configured = load_settings().output_path
         if configured:
             return Path(configured)
-        return self.source_dir.parent if self.source_dir else None
+        return self._default_base()
+
+    def _source_folders(self) -> list[Path]:
+        return [p.resolve() for p in self.sources if not is_pdf_file(p)]
+
+    def _default_base(self) -> Path | None:
+        """保存する場所が未設定のときの置き場所。PDF のフォルダならその隣、PDF ファイルならそれと同じフォルダ。"""
+        if not self.sources:
+            return None
+        try:
+            base = common_base(self.sources)
+        except InputError:
+            return None
+        return base.parent if base in self._source_folders() else base
 
     def output_dir(self) -> Path | None:
         base, name = self._output_base(), self.output_name_edit.text().strip()
@@ -218,14 +243,24 @@ class MainWindow(QMainWindow):
         if name in (".", "..") or any(c in name for c in INVALID_NAME_CHARS):
             return f"フォルダの名前に次の文字は使えません: {' '.join(INVALID_NAME_CHARS)}"
         out = self.output_dir()
-        if self.source_dir and out and (out == self.source_dir or self.source_dir in out.parents):
+        if self.sources:
+            try:
+                common_base(self.sources)
+            except InputError as e:
+                return str(e)
+        if out and any(out.resolve() == d or d in out.resolve().parents for d in self._source_folders()):
             return "出力フォルダが PDF のフォルダの中になっています。場所か名前を変えてください"
         return None
 
     def _choose_folder(self) -> None:
         d = QFileDialog.getExistingDirectory(self, "PDF のフォルダを選ぶ")
         if d:
-            self.set_source_dir(Path(d))
+            self.set_sources([Path(d)])
+
+    def _choose_files(self) -> None:
+        files, _ = QFileDialog.getOpenFileNames(self, "PDF ファイルを選ぶ（いくつでも）", "", "PDF (*.pdf *.PDF)")
+        if files:
+            self.set_sources([Path(f) for f in files])
 
     def _choose_output_base(self) -> None:
         d = QFileDialog.getExistingDirectory(self, "出力フォルダを作る場所", str(self._output_base() or ""))
@@ -238,14 +273,14 @@ class MainWindow(QMainWindow):
     def _update_buttons(self) -> None:
         busy = self._busy()
         configured = load_settings().output_path
-        self.output_base_label.setText(configured or "未設定（PDF のフォルダの隣に作ります）")
+        self.output_base_label.setText(configured or "未設定（PDF のフォルダの隣か、PDF ファイルと同じフォルダに作ります）")
         problem = self._output_problem()
         out = self.output_dir()
-        if self.source_dir is None:
+        if not self.sources:
             self.output_path_label.setText("")
         else:
             self.output_path_label.setText(problem or f"出力先: {out}（この中に xlsx と PDF を作ります）")
-        self.run_button.setEnabled(not busy and self.source_dir is not None and problem is None)
+        self.run_button.setEnabled(not busy and bool(self.sources) and problem is None)
         self.cancel_button.setEnabled(busy)
         has = self.result is not None
         self.open_xlsx.setEnabled(has and not busy)
@@ -262,7 +297,7 @@ class MainWindow(QMainWindow):
                                           f"出力フォルダ「{out.name}」には前の結果があります。上書きしますか？\n（{out}）")
             if answer != QMessageBox.StandardButton.Yes:
                 return
-        self._start(RunWorker("run", source_dir=self.source_dir, out_dir=out, settings=load_settings(),
+        self._start(RunWorker("run", sources=self.sources, out_dir=out, settings=load_settings(),
                               gemini_key=get_secret("gemini_api_key") or ""))
 
     def _start_rebuild(self) -> None:
