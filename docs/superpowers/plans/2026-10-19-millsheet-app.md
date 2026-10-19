@@ -29,10 +29,10 @@
 ## 2. 処理の流れ
 
 ```
-[画面] PDF のフォルダをドロップ → 保存する場所・出力フォルダ名を決める → 「読み取りを実行」
+[画面] PDF のフォルダ・PDF ファイル（いくつでも、混ぜてもよい）をドロップ → 保存する場所・出力フォルダ名を決める → 「読み取りを実行」
   │  （別スレッド: gui/worker.py の RunWorker）
   ▼
-① 準備のチェック   pipeline.run     Gemini のキー・単重マスタの URL・PDF の有無。出力フォルダを作る
+① 準備のチェック   pipeline.run     Gemini のキー・単重マスタの URL・入力を共通のフォルダ＋相対パスにそろえる（extract.resolve_inputs）。出力フォルダを作る
 ② 単重マスタ       master.fetch_master   リンク共有したスプレッドシートを CSV で読む（課金の前に止められる）
 ③ 読み取り         extract.read_folder   ページごとに キャッシュ → PNG(200dpi) → Gemini → PageResult（4 並列）
 ④ 生の結果を保存   rawfile.write_raw     出力フォルダ/作業データ/名前_raw.json
@@ -67,7 +67,7 @@
 | `gui/settings_dialog.py` | 設定画面（Gemini のキー、単重マスタの URL、保存する場所、接続の確認、初期マスタの CSV 書き出し） | `SettingsDialog` |
 | `gui/master_dialog.py` | 単重マスタの一覧（表示だけ。検索・材種で絞り込み） | `MasterDialog` |
 | `millsheet/pipeline.py` | 処理全体の入口 | `run`、`rebuild`、`outputs_for`、`review_messages` |
-| `millsheet/extract.py` | PDF の一覧・画像化、Gemini での読み取り、リトライ、並列化 | `list_pdfs`、`render_png`、`GeminiReader`、`read_folder` |
+| `millsheet/extract.py` | 入力（フォルダ・ファイル）の整理、PDF の一覧・画像化、Gemini での読み取り、リトライ、並列化 | `resolve_inputs`、`SourceFiles`、`list_pdfs`、`render_png`、`GeminiReader`、`read_folder` |
 | `millsheet/prompt.py` | モデル名・プロンプト・プロンプトの版 | `MODEL = "gemini-3.8-flash"`、`SYSTEM_PROMPT`、`PROMPT_VERSION` |
 | `millsheet/schema.py` | Gemini に返させる JSON の形（項目ごとの説明付き） | `Line`、`PageResult`、`PageEntry` |
 | `millsheet/cache.py` | ページ単位の読み取りキャッシュ（PDF のハッシュ＋ページ＋モデル＋プロンプトの版） | `PageCache`、`file_hash` |
@@ -134,7 +134,7 @@
 
 - [ ] 単重マスタのサイズにダッシュの異体字（`ー` `−` `‐` `–`）があると照合できない → `size_key` で記号の後ろの区切りをまとめてそろえる（`master.py` の重複チェックも同じキーなので一緒に直る）
 - [ ] 作り直すときに元の PDF のページが減っていると、`insert_pdf` が黙って最後のページを入れる → `_raw.json` に元の PDF のハッシュかページ数を記録し、`merge_pages` の前に照合して合わなければ PDF を作らない
-- [ ] 読み取り中に追加された PDF が結果から黙って抜ける → `read_folder` で最初に取った PDF の一覧を最後まで使う
+- [x] 読み取り中に追加された PDF が結果から黙って抜ける → `read_folder` で最初に取った PDF の一覧を最後まで使う（5.7 の入力の作業で直した）
 - [ ] Mac の `._*.pdf` などの隠しファイルがエラー行になる → `list_pdfs` で `.` で始まる名前を除く
 - [ ] xlsx の保存に失敗しても「完了」と表示する → `RunResult.errors` があるときは「一部の出力ができませんでした」と表示し、「xlsx を開く」を押せなくする
 - [ ] 作り直しの最中にキャンセルボタンが押せるが効かない → 作り直しの間はキャンセルボタンを押せなくする
@@ -175,11 +175,12 @@ ditto -c -k --keepParent "dist/ミルシート読み取り.app" "dist/ミルシ�
 - [ ] Windows 用をビルドし、起動・読み取りを確かめる（手順は 5.4）
 - [ ] Intel の Mac 用をビルドし、起動・読み取りを確かめる（Apple シリコン用とは別の `.app`。GitHub Actions に `macos-13` などの Intel のランナーを足すか、Rosetta 上の x86_64 の Python でビルドする）
 
-#### 入力: PDF ファイル単体・複数ページの PDF も受け付ける
+#### 入力: PDF ファイル単体・複数ページの PDF も受け付ける（済み）
 
-- [ ] フォルダだけでなく、PDF ファイル 1 つ・複数の PDF ファイルのドロップ／選択を受け付ける（`DropArea`・`pipeline.run`・`extract.list_pdfs` / `read_folder`）
-- [ ] 何ページもつながった PDF（スキャナーでまとめて取り込んだもの）を、ページごとに読み取る。今の 1 ページずつ送る作りのままでよいか、ページ数が多いときのキャッシュ・進み具合の表示・`PageEntry.file` の表記を確かめる
-- [ ] 出力フォルダ名の初期値（今はフォルダ名）を、ファイルを渡したときはファイル名から作る
+- [x] PDF のフォルダ・PDF ファイルを、いくつでも、混ぜて渡せる（ドロップと「フォルダを選ぶ…」「ファイルを選ぶ…」）。`extract.resolve_inputs` が共通のフォルダ（`base`）とそこからの相対パスにそろえ、同じ PDF は 1 回だけ読む。PDF でないファイル・見つからないもの・別のドライブにまたがるものは止める
+- [x] つながった PDF は前から 1 ページずつ読んでいた。分割した 121 ファイルのフォルダと、それをつなぎ直した PDF 1 つで、Gemini に送る画像が全ページ同じことを確かめた（API は使っていない）
+- [x] 出力フォルダ名の初期値: フォルダはその名前、ファイルは拡張子を除いた名前、複数なら最初のもの＋「ほか」。保存する場所が未設定なら、フォルダはその隣、ファイルはそれと同じフォルダに作る。渡したフォルダの中には作らせない
+- [ ] 実際に 121 ページの連結 PDF を Gemini で読み、フォルダで読んだ結果と同じになるかを確かめる
 
 #### 重量: 全材種を「質量 ÷ 員数 × 丸数字」で出す
 
