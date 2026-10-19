@@ -4,22 +4,18 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import Literal
 
 from millsheet.classify import classify
-from millsheet.master import Master
 from millsheet.schema import Line, PageEntry, PageResult
 from millsheet.sizes import normalize_size, parse_length_mm
 
 R_NO_CIRCLE = "丸数字が書かれていません"
 R_UNREADABLE = "丸数字が読めません"
 R_MISSING = "必須項目が空です（{}）"
-R_NO_MASTER = "単重がマスタに未登録です"
 R_UNCERTAIN = "AI が読み取りに自信がないと返しました{}"
 R_OVER_QTY = "丸数字の本数（{}）が印字された本数（{}）を超えています"
 R_STAMP = "押印の本数（{}）と丸数字の合計（{}）が一致しません"
-R_MASS_DIFF = "計算した重量（{}kg）が証明書の質量からの按分（{}kg）と5%以上ずれています"
 R_NOT_CERT = "証明書ではないページです"
 R_ERROR = "読み取りに失敗しました（{}）"
 R_NO_LINES = "行が読み取れませんでした"
-R_PL_NO_PRINTED = "印字本数が読めないため、質量を按分できるか確かめられません"
 
 
 @dataclass
@@ -31,7 +27,6 @@ class Record:
     size: str | None
     length_mm: int | None
     qty: int | None
-    unit_weight: float | None
     weight: int | None
     reasons: list[str]
     input_index: int
@@ -51,7 +46,6 @@ class Record:
             "寸法": self.size,
             "長さ_mm": self.length_mm,
             "本数": self.qty,
-            "ミルシート重量": self.unit_weight,
             "重量": self.weight,
             "要確認": self.needs_review(),
             "確認理由": list(self.reasons),
@@ -67,35 +61,26 @@ def _d(x: float) -> Decimal:
 
 
 def _empty(entry: PageEntry, index: int, kind: str, reasons: list[str]) -> Record:
-    return Record(entry.file, entry.page_no, None, None, None, None, None, None, None, reasons, index, kind)
+    return Record(entry.file, entry.page_no, None, None, None, None, None, None, reasons, index, kind)
 
 
-def _line_record(entry: PageEntry, ln: Line, master: Master, index: int, stamp_reason: str | None) -> Record:
+def _weight(ln: Line, qty: int | None) -> int | None:
+    """重量 = 証明書の質量 ÷ 員数 × 使った本数。すべて使ったとき（本数 ≧ 員数）は質量そのまま。"""
+    if qty is None or ln.mass_kg is None or not ln.printed_qty:
+        return None
+    if qty >= ln.printed_qty:
+        return _round(_d(ln.mass_kg))
+    return _round(_d(ln.mass_kg) / ln.printed_qty * qty)
+
+
+def _line_record(entry: PageEntry, ln: Line, index: int, stamp_reason: str | None) -> Record:
     category = classify(ln.commodity_raw, ln.size_raw)
     is_pl = category == "PL"
     size = normalize_size(category, ln.size_raw)
     length = None if is_pl else parse_length_mm(ln.length_raw)
     qty = ln.circled_qty if ln.circle_status == "あり" else None
+    weight = _weight(ln, qty)
     reasons: list[str] = []
-
-    unit_weight = None
-    unregistered = False
-    if not is_pl and category and size:
-        hit = master.lookup(size)
-        if hit:
-            size, unit_weight = hit.size, hit.unit_weight
-        else:
-            unregistered = True
-
-    weight = None
-    if is_pl:
-        if qty is not None and ln.mass_kg is not None:
-            if ln.printed_qty and qty < ln.printed_qty:
-                weight = _round(_d(ln.mass_kg) / ln.printed_qty * qty)
-            else:
-                weight = _round(_d(ln.mass_kg))
-    elif length is not None and qty is not None and unit_weight is not None:
-        weight = _round(Decimal(length) / 1000 * qty * _d(unit_weight))
 
     # 9章のチェック（番号順）
     if ln.circle_status == "なし":
@@ -105,31 +90,18 @@ def _line_record(entry: PageEntry, ln: Line, master: Master, index: int, stamp_r
     required = [("材種", category), ("材質", ln.grade), ("寸法", size)]
     if not is_pl:
         required.append(("長さ", length))
-    required.append(("本数", qty))
-    if not is_pl and not unregistered:
-        required.append(("ミルシート重量", unit_weight))
-    if not unregistered:
-        required.append(("重量", weight))
+    required += [("本数", qty), ("質量", ln.mass_kg), ("員数", ln.printed_qty or None), ("重量", weight)]
     missing = [name for name, v in required if v is None or v == ""]
     if missing:
         reasons.append(R_MISSING.format("、".join(missing)))
-    if unregistered:
-        reasons.append(R_NO_MASTER)
     if ln.uncertain:
         reasons.append(R_UNCERTAIN.format(f"（{ln.note}）" if ln.note else ""))
     if qty is not None and ln.printed_qty is not None and qty > ln.printed_qty:
         reasons.append(R_OVER_QTY.format(qty, ln.printed_qty))
     if stamp_reason:
         reasons.append(stamp_reason)
-    if is_pl and qty is not None and not ln.printed_qty:
-        reasons.append(R_PL_NO_PRINTED)
-    if not is_pl and weight is not None and ln.mass_kg and ln.printed_qty:
-        prorated = _d(ln.mass_kg) / ln.printed_qty * qty
-        if prorated > 0 and abs(Decimal(weight) - prorated) / prorated >= Decimal("0.05"):
-            reasons.append(R_MASS_DIFF.format(weight, _round(prorated)))
 
-    return Record(entry.file, entry.page_no, category, ln.grade, size, length, qty, unit_weight, weight,
-                  reasons, index)
+    return Record(entry.file, entry.page_no, category, ln.grade, size, length, qty, weight, reasons, index)
 
 
 def _stamp_reason(result: PageResult) -> str | None:
@@ -140,7 +112,7 @@ def _stamp_reason(result: PageResult) -> str | None:
     return None if total == result.stamp_valid_qty else R_STAMP.format(result.stamp_valid_qty, total)
 
 
-def build_records(pages: list[PageEntry], master: Master) -> list[Record]:
+def build_records(pages: list[PageEntry]) -> list[Record]:
     records: list[Record] = []
     for entry in pages:
         r = entry.result
@@ -153,5 +125,5 @@ def build_records(pages: list[PageEntry], master: Master) -> list[Record]:
         else:
             stamp = _stamp_reason(r)
             for ln in r.lines:
-                records.append(_line_record(entry, ln, master, len(records), stamp))
+                records.append(_line_record(entry, ln, len(records), stamp))
     return records

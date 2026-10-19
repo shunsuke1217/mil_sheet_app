@@ -15,7 +15,6 @@ SecretName = Literal["gemini_api_key"]
 
 @dataclass
 class Settings:
-    sheet_url: str = ""          # 単重マスタのスプレッドシート（単重のタブを開いた状態の URL）
     output_path: str = ""
     exporter: str = "local_xlsx"
 

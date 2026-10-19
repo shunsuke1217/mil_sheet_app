@@ -6,11 +6,9 @@ from PySide6.QtGui import QDesktopServices, QGuiApplication, QKeySequence, QShor
 from PySide6.QtWidgets import (QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QMainWindow,
                                QMessageBox, QProgressBar, QPushButton, QVBoxLayout, QWidget)
 
-from gui.master_dialog import MasterDialog
 from gui.settings_dialog import SettingsDialog
-from gui.worker import MasterWorker, RunWorker
+from gui.worker import RunWorker
 from millsheet.extract import InputError, common_base, is_pdf_file
-from millsheet.master import Master
 from millsheet.pipeline import RunResult, outputs_for, review_messages
 from millsheet.settings import get_secret, load_settings, save_settings
 
@@ -81,16 +79,13 @@ class DropArea(QLabel):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, fetch_on_start: bool = True, open_folder_on_finish: bool = True):
+    def __init__(self, open_folder_on_finish: bool = True):
         super().__init__()
         self.setWindowTitle("ミルシート読み取り")
         self.resize(820, 680)
         self.sources: list[Path] = []     # 渡された PDF のフォルダ・ファイル
-        self.master: Master | None = None
         self.result: RunResult | None = None
         self.worker = None
-        self.master_worker = None
-        self._master_workers: list = []   # 動いている間は参照を持ち続ける（途中で捨てると落ちる）
         self._auto_name = ""              # 自動で入れた名前（ユーザーが変えていなければ、渡した PDF に合わせて替える）
         self.open_folder_on_finish = open_folder_on_finish
 
@@ -133,17 +128,10 @@ class MainWindow(QMainWindow):
         self.open_xlsx = QPushButton("xlsx を開く")
         self.open_pdf = QPushButton("PDF を開く")
         self.open_folder = QPushButton("フォルダを開く")
-        self.open_sheet = QPushButton("スプレッドシートを開く")
-        self.rebuild_button = QPushButton("マスタを読み直して作り直す")
         self.open_xlsx.clicked.connect(lambda: self._open(self.result.outputs.xlsx))
         self.open_pdf.clicked.connect(lambda: self._open(self.result.outputs.pdf))
         self.open_folder.clicked.connect(lambda: self._open(self.result.outputs.dir))
-        self.open_sheet.clicked.connect(self._open_sheet)
-        self.rebuild_button.clicked.connect(self._start_rebuild)
 
-        self.master_label = QLabel("単重マスタ: 未取得")
-        master_button = QPushButton("単重マスタ一覧")
-        master_button.clicked.connect(self._show_master)
         settings_button = QPushButton("設定")
         settings_button.clicked.connect(self._show_settings)
 
@@ -155,11 +143,10 @@ class MainWindow(QMainWindow):
         run_row = QHBoxLayout(); run_row.addWidget(self.run_button); run_row.addWidget(self.cancel_button)
         run_row.addWidget(self.progress, 1)
         open_row = QHBoxLayout()
-        for b in (self.open_xlsx, self.open_pdf, self.open_folder, self.open_sheet, self.rebuild_button):
+        for b in (self.open_xlsx, self.open_pdf, self.open_folder):
             open_row.addWidget(b)
         open_row.addStretch()
-        master_row = QHBoxLayout(); master_row.addWidget(self.master_label, 1); master_row.addWidget(master_button)
-        master_row.addWidget(settings_button)
+        settings_row = QHBoxLayout(); settings_row.addStretch(); settings_row.addWidget(settings_button)
 
         layout = QVBoxLayout()
         layout.addWidget(self.drop)
@@ -173,13 +160,11 @@ class MainWindow(QMainWindow):
         layout.addWidget(QLabel("要確認の一覧（選んで Ctrl+C / ⌘C でコピーできます）"))
         layout.addWidget(self.review_list, 1)
         layout.addLayout(open_row)
-        layout.addLayout(master_row)
+        layout.addLayout(settings_row)
         central = QWidget()
         central.setLayout(layout)
         self.setCentralWidget(central)
         self._update_buttons()
-        if fetch_on_start:
-            self.refresh_master()
 
     # 入力
     def set_sources(self, paths: list[Path]) -> None:
@@ -286,8 +271,6 @@ class MainWindow(QMainWindow):
         self.open_xlsx.setEnabled(has and not busy)
         self.open_pdf.setEnabled(has and not busy and self.result.outputs.pdf is not None)
         self.open_folder.setEnabled(has and not busy)
-        self.rebuild_button.setEnabled(not busy and out is not None and outputs_for(out).raw.exists())
-        self.open_sheet.setEnabled(bool(load_settings().sheet_url))
 
     # 実行
     def _start_run(self) -> None:
@@ -297,18 +280,15 @@ class MainWindow(QMainWindow):
                                           f"出力フォルダ「{out.name}」には前の結果があります。上書きしますか？\n（{out}）")
             if answer != QMessageBox.StandardButton.Yes:
                 return
-        self._start(RunWorker("run", sources=self.sources, out_dir=out, settings=load_settings(),
+        self._start(RunWorker(sources=self.sources, out_dir=out, settings=load_settings(),
                               gemini_key=get_secret("gemini_api_key") or ""))
-
-    def _start_rebuild(self) -> None:
-        self._start(RunWorker("rebuild", out_dir=self.output_dir(), settings=load_settings()))
 
     def _start(self, worker: RunWorker) -> None:
         self.worker = worker
         self.review_list.clear()
         self.notice.clear()
         self.progress.setRange(0, 0)
-        self.status.setText("単重マスタを確かめています…")
+        self.status.setText("読み取りの準備をしています…")
         worker.progress.connect(self._on_progress)
         worker.finished_ok.connect(self._on_finished)
         worker.failed.connect(self._on_failed)
@@ -328,8 +308,6 @@ class MainWindow(QMainWindow):
 
     def _on_finished(self, result: RunResult) -> None:
         self.result = result
-        self.master = result.master
-        self._show_master_label()
         self.progress.setRange(0, 1)
         self.progress.setValue(1)
         messages = review_messages(result.records)
@@ -338,7 +316,7 @@ class MainWindow(QMainWindow):
         self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         if self.open_folder_on_finish:
             self._open(result.outputs.dir)
-        self.notice.setText("\n".join(result.warnings + result.errors))
+        self.notice.setText("\n".join(result.errors))
         self.review_list.addItems(messages or ["要確認の行はありません"])
 
     def _on_failed(self, message: str) -> None:
@@ -347,53 +325,9 @@ class MainWindow(QMainWindow):
         self.status.setText("止まりました")
         QMessageBox.warning(self, "ミルシート読み取り", message)
 
-    # マスタ
-    def refresh_master(self) -> None:
-        s = load_settings()
-        if not s.sheet_url:
-            self.master_label.setText("単重マスタ: 設定画面でスプレッドシートの URL を入力してください")
-            return
-        self.master_label.setText("単重マスタ: 取得中…")
-        worker = MasterWorker(s.sheet_url)
-        worker.finished_ok.connect(lambda m, w, me=worker: me is self.master_worker and self._on_master(m, w))
-        worker.failed.connect(lambda m, me=worker: me is self.master_worker and
-                              self.master_label.setText(f"単重マスタ: {m}"))
-        worker.finished.connect(lambda me=worker: self._master_workers.remove(me))
-        self._master_workers.append(worker)
-        self.master_worker = worker
-        worker.start()
-
-    def _on_master(self, master: Master, warnings: list) -> None:
-        self.master = master
-        self._show_master_label()
-        if warnings:
-            self.notice.setText("\n".join(warnings))
-
-    def _show_master_label(self) -> None:
-        m = self.master.meta()
-        self.master_label.setText(f"単重マスタ: {m['件数']} 件（{m['取得元']}、{m['取得日時']}）")
-
-    def _show_master(self) -> None:
-        if self.master is None:
-            QMessageBox.information(self, "単重マスタ", "単重マスタをまだ取得していません。設定を確かめてください。")
-            return
-        MasterDialog(self.master, self, sheet_url=load_settings().sheet_url, reload=self._reload_master_sync).exec()
-
-    def _reload_master_sync(self) -> Master | None:
-        from millsheet.master import MasterFetchError, MasterValidationError, fetch_master
-        s = load_settings()
-        try:
-            self.master, warnings = fetch_master(s.sheet_url)
-        except (MasterFetchError, MasterValidationError) as e:
-            QMessageBox.warning(self, "単重マスタ", str(e))
-            return None
-        self._show_master_label()
-        return self.master
-
     def _show_settings(self) -> None:
         if SettingsDialog(self).exec():
             self._update_buttons()
-            self.refresh_master()
 
     def copy_selected_reviews(self) -> None:
         rows = sorted(self.review_list.selectedIndexes(), key=lambda i: i.row())
@@ -403,13 +337,8 @@ class MainWindow(QMainWindow):
         if path:
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
-    def _open_sheet(self) -> None:
-        QDesktopServices.openUrl(QUrl(load_settings().sheet_url))
-
     def closeEvent(self, event):
         if self._busy():
             self.worker.cancel()
             self.worker.wait(30000)
-        for w in list(self._master_workers):
-            w.wait(20000)
         super().closeEvent(event)

@@ -1,6 +1,5 @@
 """データ用フォルダの場所（SPEC 10章）。"""
 import os
-import sys
 from pathlib import Path
 
 import platformdirs
@@ -32,11 +31,3 @@ def logs_dir() -> Path:
 def settings_path() -> Path:
     return data_dir() / "settings.json"
 
-
-def master_cache_path() -> Path:
-    return data_dir() / "unit_weights_cache.json"
-
-
-def bundled_master_path() -> Path:
-    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
-    return base / "millsheet" / "unit_weights.json"
