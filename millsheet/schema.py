@@ -16,10 +16,10 @@ class Line(BaseModel):
     length_raw: str | None = Field(description=(
         "長さを印字どおり、単位も含めて写す（例: 11.5M, 5.500m, 12000, 5.5）。換算はしない。数値のカンマは除く"))
     circle_status: Literal["あり", "なし", "読めない"] = Field(description=(
-        "この行の手書きの丸数字の状態。丸数字があり数字が読める → あり。"
+        "この行の、赤色の手書きの丸数字の状態（黒色の印字・書き込みは丸数字として扱わない）。丸数字があり数字が読める → あり。"
         "丸はあるが、かすれ・押印の重なりなどで数字が読めない → 読めない。丸数字が書かれていない → なし"))
     circled_qty: int | None = Field(description=(
-        "手書きの丸数字の値（この現場で使う本数）。circle_status が「あり」のときだけ入れ、それ以外は null"))
+        "赤色の手書きの丸数字の値（この現場で使う本数）。circle_status が「あり」のときだけ入れ、それ以外は null"))
     printed_qty: int | None = Field(description="印字された本数・員数。数値のカンマは除く")
     mass_kg: float | None = Field(description="印字された質量(kg)。数値のカンマは除く")
     uncertain: bool = Field(description="この行に読み取りに自信が無い値があれば true。読めずに null にした値があるときも true")
@@ -28,10 +28,11 @@ class Line(BaseModel):
 
 class PageResult(BaseModel):
     is_certificate: bool = Field(description=(
-        "鋼材の検査証明書なら true。送付状・表紙など証明書ではないページは false にし、lines は空にする"))
+        "表題に「検査証明書」とあり、化学成分と機械的性質の欄があるページなら true。"
+        "それ以外（出荷票・材料明細表・切断リスト・送付状など）は false にし、lines は空にする"))
     stamp_valid_qty: int | None = Field(description=(
         "「本証明書は○印 N 本のみ有効です」という押印の手書きの N。押印が無い・読めないときは null"))
-    lines: list[Line] = Field(description="手書きの丸数字が付いた行（数字が読めない丸数字の行も含む）")
+    lines: list[Line] = Field(description="赤色の手書きの丸数字が付いた行（数字が読めない丸数字の行も含む）")
 
 
 @dataclass
