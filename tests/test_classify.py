@@ -12,6 +12,7 @@ from millsheet.classify import CATEGORIES, KEYWORDS, classify
     ("軽量形鋼", "2.3X100X50X20", "Cチャン"),
     ("一般構造用形鋼", "L65X65X6", "アングル"),      # 寸法の補助ルール
     ("等アングル", "6X65X65", "アングル"),
+    ("HOT ROLLED STEEL ANGLES WITH EQUAL LEGS", "30X30X3", "アングル"),   # JFE条鋼の表記（複数形）
     ("DECK PLATE", None, "デッキ"),                  # DECK が PLATE より優先
     ("LIP CHANNEL", None, "Cチャン"),                # LIP があれば Cチャン
     ("ＣＨＡＮＮＥＬ", None, "溝形鋼"),              # 全角

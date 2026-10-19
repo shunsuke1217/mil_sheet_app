@@ -14,7 +14,7 @@ KEYWORDS: list[tuple[str, list[str]]] = [
     ("丸パイプ", ["CIRCULAR TUBE", "STEEL PIPE", "STK", "STKN", "SGP", "STPG", "丸パイプ", "鋼管", "配管"]),
     ("Cチャン", ["LIP GROOVE", "C-CHANNEL", "C-CHANNELS", "C-SHAPE", "SSC", "LIP", "リップ溝形鋼", "C形鋼", "Cチャン", "軽量形鋼"]),
     ("溝形鋼", ["CHANNEL", "CHANNELS", "MC", "溝形鋼", "チャンネル", "角チャンネル"]),
-    ("アングル", ["EQUAL ANGLE", "UNEQUAL ANGLE", "ANGLE", "山形鋼", "アングル", "L形鋼"]),
+    ("アングル", ["EQUAL ANGLE", "UNEQUAL ANGLE", "ANGLE", "ANGLES", "山形鋼", "アングル", "L形鋼"]),
     ("T形鋼", ["CT", "T-BAR", "T-SHAPE", "T形鋼", "カットT"]),
     ("チェッカープレート", ["CHECKERED", "CHECKER", "チェッカー", "縞鋼板", "縞板"]),
     ("PL", ["MILLEDGED", "CUT EDGED", "HOT ROLLED PLATE", "COLD ROLLED PLATE", "STEEL PLATE", "PL", "PLATE", "鋼板", "中厚板"]),

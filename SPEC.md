@@ -144,7 +144,7 @@ class PageResult(BaseModel):
 | 6 | CIRCULAR TUBE / STEEL PIPE / STK / STKN / SGP / STPG / 丸パイプ / 鋼管 / 配管 | 丸パイプ |
 | 7 | LIP GROOVE / C-CHANNEL / C-CHANNELS / C-SHAPE / SSC / LIP / リップ溝形鋼 / C形鋼 / Cチャン / 軽量形鋼 | Cチャン |
 | 8 | CHANNEL / CHANNELS / MC / 溝形鋼 / チャンネル / 角チャンネル | 溝形鋼 |
-| 9 | EQUAL ANGLE / UNEQUAL ANGLE / ANGLE / 山形鋼 / アングル / L形鋼 | アングル |
+| 9 | EQUAL ANGLE / UNEQUAL ANGLE / ANGLE / ANGLES / 山形鋼 / アングル / L形鋼 | アングル |
 | 10 | CT / T-BAR / T-SHAPE / T形鋼 / カットT | T形鋼 |
 | 11 | CHECKERED / CHECKER / チェッカー / 縞鋼板 / 縞板 | チェッカープレート |
 | 12 | MILLEDGED / CUT EDGED / HOT ROLLED PLATE / COLD ROLLED PLATE / STEEL PLATE / PL / PLATE / 鋼板 / 中厚板 | PL |
