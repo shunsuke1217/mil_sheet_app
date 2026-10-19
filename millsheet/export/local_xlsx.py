@@ -8,14 +8,14 @@ from millsheet.export.base import save_atomic
 
 COLUMNS = [  # (見出し, レコードのキー)
     ("ページ", "ページ"), ("材種", "材種"), ("材質", "材質"), ("寸法", "寸法"), ("長さ(mm)", "長さ_mm"),
-    ("本数", "本数"), ("ミルシート重量(kg/m)", "ミルシート重量"), ("重量(kg)", "重量"),
+    ("本数", "本数"), ("重量(kg)", "重量"),
     ("要確認", "要確認"), ("確認理由", "確認理由"),
 ]
 YELLOW = PatternFill("solid", fgColor="FFF9C4")
 RED = PatternFill("solid", fgColor="FFCDD2")
-NUMBER_FORMAT_COLUMNS = {5, 8}
-VALUE_COLUMNS = range(1, 9)        # null を赤くする列（要確認・確認理由の列は除く）
-PL_BLANK_COLUMNS = {5, 7}          # PL は長さ・ミルシート重量が空欄で正しい
+NUMBER_FORMAT_COLUMNS = {5, 7}
+VALUE_COLUMNS = range(1, 8)        # null を赤くする列（要確認・確認理由の列は除く）
+PL_BLANK_COLUMNS = {5}             # PL は長さが空欄で正しい
 
 
 class LocalXlsxExporter:
@@ -45,13 +45,13 @@ class LocalXlsxExporter:
                 elif rec.get("要確認"):
                     cell.fill = YELLOW
         last = 1 + len(records)
-        ws.cell(last + 1, 7, "合計").font = Font(bold=True)
-        total = ws.cell(last + 1, 8, f"=SUM(H2:H{last})")
+        ws.cell(last + 1, 6, "合計").font = Font(bold=True)
+        total = ws.cell(last + 1, 7, f"=SUM(G2:G{last})")
         total.number_format = "#,##0"
         total.font = Font(bold=True)
         ws.freeze_panes = "A2"
-        ws.auto_filter.ref = f"A1:J{last}"
-        for col, width in zip("ABCDEFGHIJ", (8, 12, 10, 22, 10, 7, 12, 10, 8, 60)):
+        ws.auto_filter.ref = f"A1:I{last}"
+        for col, width in zip("ABCDEFGHI", (8, 12, 10, 22, 10, 7, 10, 8, 60)):
             ws.column_dimensions[col].width = width
         save_atomic(self.path, lambda p: wb.save(p))
         return str(self.path)

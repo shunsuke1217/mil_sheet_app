@@ -1,19 +1,16 @@
-"""読み取り・作り直し・マスタ取得を別スレッドで行う（画面を固めない）。"""
+"""読み取りを別スレッドで行う（画面を固めない）。"""
 import logging
 import threading
-from typing import Literal
 
 from PySide6.QtCore import QThread, Signal
 
 from millsheet import paths
 from millsheet.extract import Cancelled, ReaderAuthError, ReaderRequestError
-from millsheet.master import MasterFetchError, MasterValidationError, fetch_master
-from millsheet.pipeline import rebuild, run
+from millsheet.pipeline import run
 
 log = logging.getLogger(__name__)
 
-EXPECTED_ERRORS = (MasterFetchError, MasterValidationError, ReaderAuthError, ReaderRequestError, ValueError,
-                   FileNotFoundError)
+EXPECTED_ERRORS = (ReaderAuthError, ReaderRequestError, ValueError, FileNotFoundError)
 
 
 def friendly_error(e: Exception) -> str:
@@ -30,9 +27,8 @@ class RunWorker(QThread):
     finished_ok = Signal(object)          # RunResult
     failed = Signal(str)
 
-    def __init__(self, mode: Literal["run", "rebuild"], **pipeline_kwargs):
+    def __init__(self, **pipeline_kwargs):
         super().__init__()
-        self.mode = mode
         self.kwargs = pipeline_kwargs
         self._cancel = threading.Event()
 
@@ -44,26 +40,8 @@ class RunWorker(QThread):
 
     def run(self) -> None:
         try:
-            if self.mode == "run":
-                result = run(**self.kwargs, on_progress=self._on_progress, cancel=self._cancel)
-            else:
-                result = rebuild(**self.kwargs)
+            result = run(**self.kwargs, on_progress=self._on_progress, cancel=self._cancel)
             self.finished_ok.emit(result)
         except Exception as e:  # 画面に日本語で出し、詳しくはログへ
             self.failed.emit(friendly_error(e))
 
-
-class MasterWorker(QThread):
-    finished_ok = Signal(object, list)    # Master, 警告
-    failed = Signal(str)
-
-    def __init__(self, url: str):
-        super().__init__()
-        self.url = url
-
-    def run(self) -> None:
-        try:
-            master, warnings = fetch_master(self.url)
-            self.finished_ok.emit(master, warnings)
-        except Exception as e:
-            self.failed.emit(friendly_error(e))

@@ -61,15 +61,9 @@ def sample_pages():
 
 
 @pytest.fixture
-def fixture_master():
-    from millsheet.master import load_master_file
-    return load_master_file(FIXTURES / "unit_weights.json")
-
-
-@pytest.fixture
-def sample_records(sample_pages, fixture_master):
+def sample_records(sample_pages):
     from millsheet.normalize import build_records
-    return build_records(sample_pages, fixture_master)
+    return build_records(sample_pages)
 
 
 @pytest.fixture
@@ -102,16 +96,6 @@ def fake_reader(sample_pdf, sample_pages):
     from tests.helpers import FakeReader, png_hash
     results = {png_hash(sample_pdf, e.page_no): e.result for e in sample_pages if e.file == sample_pdf.name}
     return FakeReader(results=results)
-
-
-def _fixture_master_loader():
-    from millsheet.master import load_master_file
-    return load_master_file(FIXTURES / "unit_weights.json"), []
-
-
-@pytest.fixture
-def fixture_master_loader():
-    return _fixture_master_loader
 
 
 @pytest.fixture(autouse=True)

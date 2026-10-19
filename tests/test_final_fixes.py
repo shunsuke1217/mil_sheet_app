@@ -10,10 +10,8 @@ from google.genai._gaos.lib import compat_errors as ce
 from millsheet import extract
 from millsheet.cache import PageCache
 from millsheet.extract import GeminiReader, ReaderAuthError, ReaderRequestError, read_folder
-from millsheet.normalize import R_PL_NO_PRINTED, build_records
 from millsheet.pipeline import outputs_for, run
 from millsheet.settings import Settings
-from tests.conftest import _fixture_master_loader
 from tests.helpers import FakeReader, line, make_pdf, page_result, page_with
 
 
@@ -90,11 +88,6 @@ def test_cache_write_failure_does_not_stop_reading(tmp_path, monkeypatch):
     assert e[0].result is not None
 
 
-# I5
-def test_pl_without_printed_qty_is_flagged(fixture_master):
-    r = build_records([page_with(line(commodity_raw="PLATE", size_raw="9X1524X3048", length_raw=None,
-                                      circled_qty=1, printed_qty=None, mass_kg=3285))], fixture_master)[0]
-    assert R_PL_NO_PRINTED in r.reasons
 
 
 # I6
@@ -125,5 +118,5 @@ def test_unreadable_file_hash_becomes_file_error(tmp_path, monkeypatch):
 def test_missing_output_dir_is_created(tmp_path):
     make_pdf(tmp_path / "src/a.pdf", 1)
     res = run(tmp_path / "src", tmp_path / "new/dir/o", settings=Settings(), gemini_key="g",
-              reader=FakeReader(), master_loader=_fixture_master_loader)
+              reader=FakeReader())
     assert res.outputs.raw.exists() and res.outputs.xlsx.exists()

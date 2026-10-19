@@ -17,29 +17,21 @@ def test_fixture_raw_matches_schema():
     assert raw["pages"]["サンプル_例外.pdf"][1]["error"] == "APIタイムアウト"
 
 
-def test_bundled_master_has_225_entries_with_category():
-    data = json.loads(Path("millsheet/unit_weights.json").read_text("utf-8"))
-    assert len(data) == 225
-    assert {"材種", "サイズ", "単重"} == set(data[0])
-    assert {d["材種"] for d in data} == {"H形鋼", "溝形鋼", "Cチャン", "アングル", "コラム/STKR", "FB", "PL"}
 
 
 def test_data_dir_created_and_overridable(tmp_path, monkeypatch):
     monkeypatch.setenv("MILLSHEET_DATA_DIR", str(tmp_path / "d"))
     assert paths.data_dir() == tmp_path / "d"
     assert paths.data_dir().is_dir()
-    assert paths.master_cache_path() == tmp_path / "d" / "unit_weights_cache.json"
     assert paths.cache_dir().is_dir() and paths.logs_dir().is_dir()
 
 
-def test_bundled_master_path_exists():
-    assert paths.bundled_master_path().exists()
 
 
 def test_settings_roundtrip_has_no_secrets(data_dir):
-    save_settings(Settings(sheet_url="https://docs.google.com/spreadsheets/d/abc/edit"))
+    save_settings(Settings(output_path="/tmp/出力"))
     set_secret("gemini_api_key", "GKEY123")
-    assert load_settings().sheet_url.endswith("/abc/edit")
+    assert load_settings().output_path == "/tmp/出力"
     assert "GKEY123" not in (data_dir / "settings.json").read_text("utf-8")
     assert get_secret("gemini_api_key") == "GKEY123"
 

@@ -19,7 +19,7 @@ jobs:
           python-version: "3.12"
       - run: pip install -r requirements-dev.txt pyinstaller
       - run: pytest -q
-      - run: pyinstaller --noconfirm --windowed ${{ runner.os == 'Windows' && '--onefile' || '' }} --name ミルシート読み取り --add-data "millsheet/unit_weights.json:millsheet" main.py
+      - run: pyinstaller --noconfirm --windowed ${{ runner.os == 'Windows' && '--onefile' || '' }} --name ミルシート読み取り main.py
       - if: runner.os == 'macOS'
         run: ditto -c -k --keepParent "dist/ミルシート読み取り.app" "dist/ミルシート読み取り-mac.zip"
       - uses: actions/upload-artifact@v4
