@@ -81,6 +81,23 @@ def test_concurrent_cache_put_same_key(tmp_path):
     assert errors == [] and c.get("h", 1) is not None
 
 
+def test_cache_put_tolerates_windows_replace_conflict(tmp_path, monkeypatch):
+    """Windows では、別のスレッドが置き換え中のファイルへの os.replace が PermissionError になる。"""
+    c = PageCache(tmp_path)
+    c.put("h", 1, page_result())
+    monkeypatch.setattr("millsheet.cache.os.replace", Mock(side_effect=PermissionError(13, "Access is denied")))
+    c.put("h", 1, page_result())
+    assert c.get("h", 1) is not None and list(tmp_path.glob("*.tmp")) == []
+
+
+def test_cache_put_raises_replace_error_when_nothing_written(tmp_path, monkeypatch):
+    c = PageCache(tmp_path)
+    monkeypatch.setattr("millsheet.cache.os.replace", Mock(side_effect=PermissionError(13, "Access is denied")))
+    with pytest.raises(PermissionError):
+        c.put("h", 1, page_result())
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
 def test_cache_write_failure_does_not_stop_reading(tmp_path, monkeypatch):
     make_pdf(tmp_path / "src/a.pdf", 1)
     monkeypatch.setattr(PageCache, "put", Mock(side_effect=OSError("disk full")))

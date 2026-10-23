@@ -39,4 +39,11 @@ class PageCache:
         fd, tmp = tempfile.mkstemp(dir=self.dir, suffix=".tmp")
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(result.model_dump_json())
-        os.replace(tmp, p)
+        try:
+            os.replace(tmp, p)
+        except PermissionError:
+            # Windows では、別のスレッドが同じファイルを置き換え中・読み込み中だと置き換えられない。
+            # 同じキーなら中身も同じなので、もう書かれていればそれでよい
+            os.unlink(tmp)
+            if not p.exists():
+                raise
