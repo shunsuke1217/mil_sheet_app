@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 
 from millsheet import paths
 from millsheet.applog import mask
@@ -7,8 +6,8 @@ from millsheet.schema import PageResult
 from millsheet.settings import Settings, get_secret, load_settings, save_settings, set_secret
 
 
-def test_fixture_raw_matches_schema():
-    raw = json.loads(Path("tests/fixtures/sample_raw.json").read_text("utf-8"))
+def test_fixture_raw_matches_schema(sample_raw):
+    raw = json.loads(sample_raw.read_text("utf-8"))
     pages = raw["pages"]["20261014084620.pdf"]
     assert len(pages) == 10
     for p in pages:

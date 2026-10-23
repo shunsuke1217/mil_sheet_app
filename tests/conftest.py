@@ -9,6 +9,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 FIXTURES = Path(__file__).parent / "fixtures"
 SAMPLE_PDF = FIXTURES / "20261014084620.pdf"
+SAMPLE_RAW = FIXTURES / "sample_raw.json"
 
 
 class MemoryKeyring(KeyringBackend):
@@ -53,11 +54,17 @@ def sample_pdf():
     return SAMPLE_PDF
 
 
+@pytest.fixture
+def sample_raw():
+    if not SAMPLE_RAW.exists():
+        pytest.skip("サンプルの読み取り結果がありません（社外秘のためリポジトリに含めていない）")
+    return SAMPLE_RAW
+
 
 @pytest.fixture
-def sample_pages():
+def sample_pages(sample_raw):
     from millsheet.rawfile import read_raw
-    return read_raw(FIXTURES / "sample_raw.json")[1]
+    return read_raw(sample_raw)[1]
 
 
 @pytest.fixture

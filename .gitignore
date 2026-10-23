@@ -11,5 +11,6 @@ build/
 /sample_raw.json
 /unit_weights.json
 tests/fixtures/*.pdf
+tests/fixtures/*.json
 *.key.json
 .env

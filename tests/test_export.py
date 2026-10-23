@@ -1,6 +1,5 @@
 import json
 import os
-from pathlib import Path
 
 import openpyxl
 import pytest
@@ -78,7 +77,7 @@ def test_raw_roundtrip(tmp_path, sample_pages):
     assert src == tmp_path and pages == sample_pages
 
 
-def test_read_raw_accepts_fixture():
-    src, pages = read_raw(Path("tests/fixtures/sample_raw.json"))
+def test_read_raw_accepts_fixture(sample_raw):
+    src, pages = read_raw(sample_raw)
     assert src is None and len(pages) == 12
     assert pages[0].file == "20261014084620.pdf" and pages[-1].error == "APIタイムアウト"
