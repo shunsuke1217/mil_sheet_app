@@ -13,6 +13,9 @@ from millsheet.classify import CATEGORIES, KEYWORDS, classify
     ("一般構造用形鋼", "L65X65X6", "アングル"),      # 寸法の補助ルール
     ("等アングル", "6X65X65", "アングル"),
     ("HOT ROLLED STEEL ANGLES WITH EQUAL LEGS", "30X30X3", "アングル"),   # JFE条鋼の表記（複数形）
+    ("HOT ROLLED STEEL SHEET", "6X1524X3048", "PL"),
+    ("Steel Sheets", None, "PL"),                     # 小文字・複数形
+    ("SHEETING", None, None),                         # SHEET も単語単位
     ("DECK PLATE", None, "デッキ"),                  # DECK が PLATE より優先
     ("LIP CHANNEL", None, "Cチャン"),                # LIP があれば Cチャン
     ("ＣＨＡＮＮＥＬ", None, "溝形鋼"),              # 全角

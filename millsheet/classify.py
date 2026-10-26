@@ -17,7 +17,7 @@ KEYWORDS: list[tuple[str, list[str]]] = [
     ("アングル", ["EQUAL ANGLE", "UNEQUAL ANGLE", "ANGLE", "ANGLES", "山形鋼", "アングル", "L形鋼"]),
     ("T形鋼", ["CT", "T-BAR", "T-SHAPE", "T形鋼", "カットT"]),
     ("チェッカープレート", ["CHECKERED", "CHECKER", "チェッカー", "縞鋼板", "縞板"]),
-    ("PL", ["MILLEDGED", "CUT EDGED", "HOT ROLLED PLATE", "COLD ROLLED PLATE", "STEEL PLATE", "PL", "PLATE", "鋼板", "中厚板"]),
+    ("PL", ["MILLEDGED", "CUT EDGED", "HOT ROLLED PLATE", "COLD ROLLED PLATE", "STEEL PLATE", "PL", "PLATE", "SHEET", "SHEETS", "鋼板", "中厚板"]),
     ("FB", ["FLAT BAR", "FB", "平鋼", "フラットバー"]),
     ("D（鉄筋）", ["DEFORMED BAR", "SD295", "SD345", "異形棒鋼", "異形丸鋼", "鉄筋"]),
     ("角鋼", ["SQUARE BAR", "角鋼", "角棒"]),

@@ -144,7 +144,7 @@ class PageResult(BaseModel):
 | 9 | EQUAL ANGLE / UNEQUAL ANGLE / ANGLE / ANGLES / 山形鋼 / アングル / L形鋼 | アングル |
 | 10 | CT / T-BAR / T-SHAPE / T形鋼 / カットT | T形鋼 |
 | 11 | CHECKERED / CHECKER / チェッカー / 縞鋼板 / 縞板 | チェッカープレート |
-| 12 | MILLEDGED / CUT EDGED / HOT ROLLED PLATE / COLD ROLLED PLATE / STEEL PLATE / PL / PLATE / 鋼板 / 中厚板 | PL |
+| 12 | MILLEDGED / CUT EDGED / HOT ROLLED PLATE / COLD ROLLED PLATE / STEEL PLATE / PL / PLATE / SHEET / SHEETS / 鋼板 / 中厚板 | PL |
 | 13 | FLAT BAR / FB / 平鋼 / フラットバー | FB |
 | 14 | DEFORMED BAR / SD295 / SD345 / 異形棒鋼 / 異形丸鋼 / 鉄筋 | D（鉄筋） |
 | 15 | SQUARE BAR / 角鋼 / 角棒 | 角鋼 |
