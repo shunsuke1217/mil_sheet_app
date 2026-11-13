@@ -46,10 +46,31 @@ def _compile(word: str):
 _MATCHERS = [(c, [_compile(w) for w in words]) for c, words in KEYWORDS]
 
 
-def classify(commodity_raw: str | None, size_raw: str | None) -> str | None:
+# 品名欄が「角形鋼管」だけのときは、材質でコラムと STKR を分ける（丸パイプの「鋼管」より先に調べる）
+SQUARE_TUBE_WORDS = ["角形鋼管", "角型鋼管"]
+SQUARE_TUBE_GRADES: list[tuple[str, list[str]]] = [
+    ("コラム", ["BCR", "BCP"]),
+    ("STKR", ["STKR"]),
+]
+_SQUARE_TUBE_MATCHERS = [(c, [_compile(w) for w in words]) for c, words in SQUARE_TUBE_GRADES]
+
+
+def _square_tube(grade: str | None) -> str | None:
+    """材質で決まらなければ None（要確認）。丸パイプにはしない。"""
+    if grade:
+        text = _normalize(grade)
+        for category, matchers in _SQUARE_TUBE_MATCHERS:
+            if any(m(text) for m in matchers):
+                return category
+    return None
+
+
+def classify(commodity_raw: str | None, size_raw: str | None, grade: str | None = None) -> str | None:
     if commodity_raw:
         text = _normalize(commodity_raw)
         for category, matchers in _MATCHERS:
+            if category == "丸パイプ" and any(w in text for w in SQUARE_TUBE_WORDS):
+                return _square_tube(grade)
             if any(m(text) for m in matchers):
                 return category
     # 寸法による補助ルール: 寸法が L で始まる、または寸法の並びの直前の記号が L（"K12 L65X65X6" など）

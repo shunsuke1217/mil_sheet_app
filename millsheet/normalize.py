@@ -58,7 +58,7 @@ def _empty(entry: PageEntry, index: int, kind: str, reasons: list[str]) -> Recor
 
 
 def _line_record(entry: PageEntry, ln: Line, index: int, stamp_reason: str | None) -> Record:
-    category = classify(ln.commodity_raw, ln.size_raw)
+    category = classify(ln.commodity_raw, ln.size_raw, ln.grade)
     is_pl = category == "PL"
     size = normalize_size(category, ln.size_raw)
     length = None if is_pl else parse_length_mm(ln.length_raw)

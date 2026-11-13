@@ -52,3 +52,19 @@ def test_no_keyword_is_shadowed_by_an_earlier_one():
 ])
 def test_angle_rule_looks_at_symbol_before_dimension(raw, size, expected):
     assert classify(raw, size) == expected
+
+
+@pytest.mark.parametrize("raw,grade,expected", [
+    ("角形鋼管", "BCR295", "コラム"),
+    ("角形鋼管", "BCP235", "コラム"),
+    ("角形鋼管", "BCP325", "コラム"),
+    ("角形鋼管", "STKR400", "STKR"),
+    ("角形鋼管", "STKR490", "STKR"),
+    ("角型鋼管", "BCR295", "コラム"),                # 「型」の表記ゆれ
+    ("角形鋼管", "SS400", None),                      # 材質で決まらなければ未分類（丸パイプにはしない）
+    ("角形鋼管", None, None),
+    ("一般構造用角形鋼管", "BCR295", "STKR"),         # 品名欄で決まるものは品名欄を優先
+    ("鋼管", "BCR295", "丸パイプ"),                   # 「角形」が無ければ材質は見ない
+])
+def test_square_tube_is_split_by_grade(raw, grade, expected):
+    assert classify(raw, None, grade) == expected
