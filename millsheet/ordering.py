@@ -27,14 +27,20 @@ def _sort_key(r: Record):
 
 
 def order_records(records: list[Record]) -> tuple[list[Record], list[PageRef]]:
-    ordered = sorted(records, key=_sort_key)
-    numbers: dict[PageRef, int] = {}
-    for r in ordered:
-        if r.page_no is None:
-            r.page_label = None
-            continue
-        ref = (r.file, r.page_no)
-        if ref not in numbers:
-            numbers[ref] = len(numbers) + 1
-        r.page_label = f"Ｐ-{numbers[ref]}"
-    return ordered, list(numbers)
+    """並べ替えたうえで、同じページの行は、そのページで一番早く出てくる行の位置にまとめる。"""
+    by_sort = sorted(records, key=_sort_key)
+    groups: dict[object, list[Record]] = {}   # ページごとの行（並べ替えた順）。ページの無い行は 1 行ずつ
+    for r in by_sort:
+        key = (r.file, r.page_no) if r.page_no is not None else id(r)
+        groups.setdefault(key, []).append(r)
+    ordered: list[Record] = []
+    pages: list[PageRef] = []
+    for key, rows in groups.items():
+        label = None
+        if rows[0].page_no is not None:
+            pages.append(key)
+            label = f"Ｐ-{len(pages)}"
+        for r in rows:
+            r.page_label = label
+        ordered.extend(rows)
+    return ordered, pages

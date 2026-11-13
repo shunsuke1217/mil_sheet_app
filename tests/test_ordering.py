@@ -27,14 +27,28 @@ def test_null_length_goes_last_within_size():
     assert [r.input_index for r in order_records(recs)[0]] == [1, 0]
 
 
-def test_page_placed_at_earliest_row_and_shares_label():
-    # 1.pdf p1 に 溝形鋼、2.pdf p1 に H形鋼 と 溝形鋼
+def test_page_rows_are_kept_together_at_earliest_row():
+    # 1.pdf p1 に 溝形鋼、2.pdf p1 に H形鋼 と 溝形鋼 → 2.pdf p1 の 2 行はまとめて先頭に並ぶ
     recs = [rec(file="1.pdf", page=1, cat="溝形鋼", size="［-150×75×6.5", i=0),
             rec(file="2.pdf", page=1, cat="H形鋼", size="Ｈ-200×200×8×12", i=1),
             rec(file="2.pdf", page=1, cat="溝形鋼", size="［-100×50×5", i=2)]
     ordered, pages = order_records(recs)
     assert pages == [("2.pdf", 1), ("1.pdf", 1)]
-    assert [(r.input_index, r.page_label) for r in ordered] == [(1, "Ｐ-1"), (0, "Ｐ-2"), (2, "Ｐ-1")]
+    assert [(r.input_index, r.page_label) for r in ordered] == [(1, "Ｐ-1"), (2, "Ｐ-1"), (0, "Ｐ-2")]
+
+
+def test_other_category_row_follows_its_page():
+    # H1, H2(I2 と同じページ), H3, I1, I3 → H1, H2, I2, H3, I1, I3
+    recs = [rec(file="a.pdf", page=1, cat="H形鋼", size="Ｈ-400×200×8×13", i=0),
+            rec(file="a.pdf", page=2, cat="H形鋼", size="Ｈ-350×175×7×11", i=1),
+            rec(file="a.pdf", page=2, cat="I形鋼", size="Ｉ-200×100×7×10", i=2),
+            rec(file="a.pdf", page=3, cat="H形鋼", size="Ｈ-200×100×5.5×8", i=3),
+            rec(file="a.pdf", page=4, cat="I形鋼", size="Ｉ-300×150×8×13", i=4),
+            rec(file="a.pdf", page=5, cat="I形鋼", size="Ｉ-150×75×5.5×9.5", i=5)]
+    ordered, pages = order_records(recs)
+    assert [r.input_index for r in ordered] == [0, 1, 2, 3, 4, 5]
+    assert [r.page_label for r in ordered] == ["Ｐ-1", "Ｐ-2", "Ｐ-2", "Ｐ-3", "Ｐ-4", "Ｐ-5"]
+    assert pages == [("a.pdf", n) for n in range(1, 6)]
 
 
 def test_unreadable_pdf_row_gets_no_page_number():
