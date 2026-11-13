@@ -71,3 +71,14 @@ def test_extract_dimension():
     assert extract_dimension("２．３Ｘ１００Ｘ５０Ｘ２０") == "2.3X100X50X20"
     assert extract_dimension("200X100X5.5/8 と 10X20") == "200X100X5.5/8"
     assert extract_dimension("φ22") is None and extract_dimension(None) is None
+
+
+def test_two_dimensions_joined_by_slash_are_not_merged():
+    # 本表の寸法と別表の寸法（書き順が逆）が " / " でつながって返ってきたとき、本表の寸法だけを使う
+    from millsheet.sizes import extract_dimension
+    assert extract_dimension("L40X40X5 / 5X40X40") == "40X40X5"
+    assert normalize_size("アングル", "L40X40X5 / 5X40X40") == "L-40×40×5"
+    assert normalize_size("アングル", "6X65X65/L65X65X6") == "L-65×65×6"
+    # H形鋼のウェブ/フランジの「/」はこれまでどおり寸法の一部
+    assert normalize_size("H形鋼", "200X100X5.5/8") == "Ｈ-200×100×5.5×8"
+    assert normalize_size("H形鋼", "300 X 150 X 6.5 / 9.0") == "Ｈ-300×150×6.5×9"

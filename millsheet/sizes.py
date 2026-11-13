@@ -5,7 +5,10 @@ from decimal import ROUND_HALF_UP, Decimal
 
 _NUMBER = re.compile(r"\d+(?:\.\d+)?")
 # 寸法 = 区切り記号（X × * /）でつながった数字の並び（例: 2.3X100X50X20、19 X 2438 X 12192、200X100X5.5/8）
-_DIMENSION = re.compile(r"\d+(?:\.\d+)?(?:\s*[X×*/]\s*\d+(?:\.\d+)?)+")
+# 「/」は直後の数字の後に X が続かないときだけ区切りとみなす。
+# "L40X40X5 / 5X40X40"（本表と別表の寸法）のように、「/」の後ろが別の寸法なら 2 つに分ける
+_DIMENSION = re.compile(
+    r"\d+(?:\.\d+)?(?:\s*[X×*]\s*\d+(?:\.\d+)?|\s*/\s*\d+(?:\.\d+)?(?![\d.])(?!\s*[X×*]))+")
 _THOUSANDS = re.compile(r"(?<=\d),(?=\d{3})")
 
 # 品名 → (記号, 並べ方)
